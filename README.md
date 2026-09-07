@@ -12,7 +12,7 @@ Client-side app untuk visualisasi JSON export Google Timeline / Location History
 - Playback scrubber
 - Heatmap
 - Export GeoJSON
-- Studio video: peta stylized + label kota/tempat, ikon motor/mobil/sepeda/jalan (otomatis/override), trail, kecepatan video 0.5×–8×, resolusi 720p/1080p/1440p, bitrate rendah/normal/tinggi
+- Studio video: background **peta tile statis** (Carto/OSM) + label kota/tempat yang dilalui, ikon motor/mobil/sepeda/jalan, kecepatan video 0.5×–8×, resolusi 720p/1080p/1440p, bitrate
 - Export **MP4** via native MediaRecorder when possible, else WebM → **ffmpeg_asm.js** (Muaz Khan Ffmpeg.js), progress per tahap, batal jelas
 - Landing marketing: hero, fitur, cara kerja, privasi, import
 

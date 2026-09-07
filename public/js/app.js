@@ -1,21 +1,20 @@
-import { createTimelineMap } from './map.js?v=15';
+import { createTimelineMap } from './map.js?v=16';
 import {
   createVideoStudio,
-  listFilters,
   RES_PRESETS,
   BITRATE_MULTIPLIERS,
   ExportCancelled,
   supportsNativeMp4,
-} from './video.js?v=15';
-import { getSampleTimeline } from './sample.js?v=15';
-import { parseTimelineJson, filterTimeline } from './parse.js?v=15';
+} from './video.js?v=16';
+import { getSampleTimeline } from './sample.js?v=16';
+import { parseTimelineJson, filterTimeline } from './parse.js?v=16';
 import {
   convertWebmToMp4,
   cancelConvert,
   preloadFfmpeg,
   prefetchEncoderAssets,
   isFfmpegReady,
-} from './ffmpeg-export.js?v=15';
+} from './ffmpeg-export.js?v=16';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -410,32 +409,32 @@ function runStudioPreview() {
   if (!state.view) {
     throw new Error('Belum ada data timeline. Import JSON dulu.');
   }
-  ensureStudio().preview(state.view, getStudioOpts());
+  $('#studio-status').textContent = 'Memuat peta latar…';
+  return ensureStudio()
+    .preview(state.view, getStudioOpts())
+    .then(() => {
+      if (!$('#studio').hidden) {
+        $('#studio-status').textContent = supportsNativeMp4()
+          ? 'Preview looping · peta siap · MP4 native'
+          : 'Preview looping · peta siap';
+      }
+    })
+    .catch((err) => {
+      $('#studio-status').textContent = err.message || 'Gagal preview';
+    });
 }
 
 function openStudio() {
   $('#studio').hidden = false;
   document.body.classList.add('studio-open');
-  try {
-    runStudioPreview();
-    $('#studio-status').textContent = supportsNativeMp4()
-      ? 'Preview looping · MP4 native (tanpa unduh encoder)'
-      : 'Preview looping… menyiapkan encoder di latar…';
-  } catch (err) {
-    $('#studio-status').textContent = err.message;
-  }
+  runStudioPreview();
 
   if (supportsNativeMp4()) return;
 
-  // Prefetch + init ffmpeg while user tweaks settings
   prefetchEncoderAssets();
   preloadFfmpeg((info) => {
-    if ($('#studio').hidden) return;
+    if ($('#studio').hidden || state.exporting) return;
     const pct = Math.round((info.ratio || 0) * 100);
-    if (state.exporting) {
-      // Export UI owns the status; still allow progress via convert listeners
-      return;
-    }
     if (info.phase === 'ready') {
       $('#studio-status').textContent = 'Preview looping · encoder siap';
       setStudioProgress('Encoder siap', 0, 1);
@@ -467,7 +466,6 @@ function getStudioOpts() {
   const mult = BITRATE_MULTIPLIERS[$('#studio-bitrate')?.value] ?? 1;
   const videoBitsPerSecond = Math.round(preset.baseBitrate * mult);
   return {
-    filter: $('#studio-filter').value,
     speed: Number($('#studio-speed').value) || 1,
     trail: Number($('#studio-trail').value) || 40,
     icon: $('#studio-icon')?.value || 'auto',
@@ -728,12 +726,7 @@ function init() {
     downloadBlob(state.lastWebm, `timeline-${Date.now()}.webm`);
   });
   $('#btn-preview-video').addEventListener('click', () => {
-    try {
-      runStudioPreview();
-      $('#studio-status').textContent = 'Preview looping…';
-    } catch (err) {
-      $('#studio-status').textContent = err.message;
-    }
+    runStudioPreview();
   });
 
   $('#btn-sample-hero')?.addEventListener('click', () => {
@@ -773,21 +766,10 @@ function init() {
     }
   });
 
-  const filterSel = $('#studio-filter');
-  for (const f of listFilters()) {
-    const opt = document.createElement('option');
-    opt.value = f.id;
-    opt.textContent = f.label;
-    filterSel.appendChild(opt);
-  }
-  ['studio-filter', 'studio-speed', 'studio-trail', 'studio-res', 'studio-bitrate', 'studio-icon'].forEach((id) => {
+  ['studio-speed', 'studio-trail', 'studio-res', 'studio-bitrate', 'studio-icon'].forEach((id) => {
     $(`#${id}`)?.addEventListener('change', () => {
       if ($('#studio').hidden) return;
-      try {
-        runStudioPreview();
-      } catch (err) {
-        $('#studio-status').textContent = err.message;
-      }
+      runStudioPreview();
     });
   });
 

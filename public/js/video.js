@@ -1,5 +1,5 @@
 /**
- * Canvas video studio — stylized map, activity icons, WebM export.
+ * Canvas video studio — static map tiles background, city labels, WebM/MP4 export.
  */
 
 import { activityColor } from './map.js';
@@ -11,55 +11,6 @@ export class ExportCancelled extends Error {
     this.name = 'ExportCancelled';
   }
 }
-
-const FILTERS = {
-  clean: {
-    label: 'Clean',
-    bg: ['#0a100e', '#14241e'],
-    land: '#16352c',
-    road: 'rgba(232,220,200,0.12)',
-    path: null,
-    glow: false,
-    stamp: 'rgba(232,184,109,0.95)',
-  },
-  neon: {
-    label: 'Neon trail',
-    bg: ['#05070a', '#0d1520'],
-    land: '#0a1a28',
-    road: 'rgba(94,240,200,0.1)',
-    path: '#5ef0c8',
-    glow: true,
-    stamp: '#5ef0c8',
-  },
-  vintage: {
-    label: 'Vintage',
-    bg: ['#1a1510', '#2a2218'],
-    land: '#3a2e22',
-    road: 'rgba(232,213,176,0.14)',
-    path: '#c4a574',
-    glow: false,
-    stamp: '#e8d5b0',
-    sepia: true,
-  },
-  mono: {
-    label: 'Mono',
-    bg: ['#0e0e0e', '#1a1a1a'],
-    land: '#222',
-    road: 'rgba(255,255,255,0.1)',
-    path: '#d0d0d0',
-    glow: false,
-    stamp: '#f0f0f0',
-  },
-  sunset: {
-    label: 'Sunset',
-    bg: ['#1a0f14', '#2a1820'],
-    land: '#3a1c28',
-    road: 'rgba(255,201,168,0.12)',
-    path: '#ff8b6a',
-    glow: true,
-    stamp: '#ffc9a8',
-  },
-};
 
 export const RES_PRESETS = {
   1280: { width: 1280, height: 720, label: '720p', baseBitrate: 4_000_000 },
@@ -82,11 +33,18 @@ export const ICON_OPTIONS = [
   { id: 'dot', label: 'Titik' },
 ];
 
+const TILE_SIZE = 256;
+const TILE_SUBS = ['a', 'b', 'c', 'd'];
+const PATH_COLOR = '#1d6b4f';
+const ACCENT = '#c9872a';
+const MAX_TILES = 48;
+
+/** @deprecated themes removed — kept for older app.js imports */
 export function listFilters() {
-  return Object.entries(FILTERS).map(([id, f]) => ({ id, label: f.label }));
+  return [];
 }
 
-function project(points) {
+function boundsFromPoints(points) {
   let minLat = Infinity,
     maxLat = -Infinity,
     minLng = Infinity,
@@ -103,9 +61,9 @@ function project(points) {
     minLng = 106;
     maxLng = 107;
   }
-  const pad = 0.1;
-  const dLat = Math.max(maxLat - minLat, 0.01) * (1 + pad);
-  const dLng = Math.max(maxLng - minLng, 0.01) * (1 + pad);
+  const pad = 0.12;
+  const dLat = Math.max(maxLat - minLat, 0.008) * (1 + pad);
+  const dLng = Math.max(maxLng - minLng, 0.008) * (1 + pad);
   const cLat = (minLat + maxLat) / 2;
   const cLng = (minLng + maxLng) / 2;
   return {
@@ -116,14 +74,118 @@ function project(points) {
   };
 }
 
-function toXY(p, bounds, w, h, margin = 56) {
-  const x =
-    margin +
-    ((p.lng - bounds.minLng) / (bounds.maxLng - bounds.minLng)) * (w - margin * 2);
+function latLngToWorld(lat, lng, zoom) {
+  const sin = Math.sin((lat * Math.PI) / 180);
+  const z = 2 ** zoom;
+  const x = ((lng + 180) / 360) * z;
   const y =
-    margin +
-    (1 - (p.lat - bounds.minLat) / (bounds.maxLat - bounds.minLat)) * (h - margin * 2);
+    (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * z;
   return { x, y };
+}
+
+function chooseZoom(bounds, w, h) {
+  for (let z = 15; z >= 4; z--) {
+    const tl = latLngToWorld(bounds.maxLat, bounds.minLng, z);
+    const br = latLngToWorld(bounds.minLat, bounds.maxLng, z);
+    const tilesX = Math.ceil(Math.abs(br.x - tl.x)) + 1;
+    const tilesY = Math.ceil(Math.abs(br.y - tl.y)) + 1;
+    if (tilesX * tilesY <= MAX_TILES && tilesX * TILE_SIZE >= w * 0.55) {
+      return z;
+    }
+  }
+  return 4;
+}
+
+function createMercator(bounds, w, h) {
+  const zoom = chooseZoom(bounds, w, h);
+  const tl = latLngToWorld(bounds.maxLat, bounds.minLng, zoom);
+  const br = latLngToWorld(bounds.minLat, bounds.maxLng, zoom);
+  const worldW = Math.max(br.x - tl.x, 1e-9);
+  const worldH = Math.max(br.y - tl.y, 1e-9);
+  return {
+    zoom,
+    tl,
+    br,
+    worldW,
+    worldH,
+    w,
+    h,
+    toXY(p) {
+      const pt = latLngToWorld(p.lat, p.lng, zoom);
+      return {
+        x: ((pt.x - tl.x) / worldW) * w,
+        y: ((pt.y - tl.y) / worldH) * h,
+      };
+    },
+  };
+}
+
+function loadTileImage(z, x, y) {
+  const n = 2 ** z;
+  const xx = ((x % n) + n) % n;
+  const s = TILE_SUBS[(xx + y) % 4];
+  const url = `https://${s}.basemaps.cartocdn.com/rastertiles/voyager/${z}/${xx}/${y}.png`;
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
+async function buildStaticMap(bounds, w, h, onProgress) {
+  const merc = createMercator(bounds, w, h);
+  const { zoom, tl, br, worldW, worldH } = merc;
+  const x0 = Math.floor(tl.x);
+  const y0 = Math.floor(tl.y);
+  const x1 = Math.floor(br.x);
+  const y1 = Math.floor(br.y);
+
+  const jobs = [];
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      jobs.push({ tx, ty });
+    }
+  }
+
+  const off = document.createElement('canvas');
+  off.width = w;
+  off.height = h;
+  const octx = off.getContext('2d');
+  octx.fillStyle = '#dfe7ee';
+  octx.fillRect(0, 0, w, h);
+
+  let done = 0;
+  const concurrency = 6;
+  for (let i = 0; i < jobs.length; i += concurrency) {
+    const batch = jobs.slice(i, i + concurrency);
+    const imgs = await Promise.all(batch.map((j) => loadTileImage(zoom, j.tx, j.ty)));
+    batch.forEach((j, idx) => {
+      const img = imgs[idx];
+      done += 1;
+      onProgress?.(done / jobs.length);
+      if (!img) return;
+      const dx = ((j.tx - tl.x) / worldW) * w;
+      const dy = ((j.ty - tl.y) / worldH) * h;
+      const dw = (1 / worldW) * w;
+      const dh = (1 / worldH) * h;
+      octx.drawImage(img, dx, dy, dw + 0.5, dh + 0.5);
+    });
+  }
+
+  // light vignette so trail pops
+  const g = octx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.max(w, h) * 0.75);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, 'rgba(0,0,0,0.18)');
+  octx.fillStyle = g;
+  octx.fillRect(0, 0, w, h);
+
+  octx.fillStyle = 'rgba(0,0,0,0.45)';
+  octx.font = '500 11px "IBM Plex Sans", system-ui, sans-serif';
+  octx.fillText('© OpenStreetMap © CARTO', 16, h - 14);
+
+  return { canvas: off, merc };
 }
 
 function formatStamp(t) {
@@ -137,22 +199,49 @@ function formatStamp(t) {
   });
 }
 
-function truncateLabel(name, max = 22) {
+function truncateLabel(name, max = 24) {
   const s = String(name || '').trim();
   if (s.length <= max) return s;
   return `${s.slice(0, max - 1)}…`;
 }
 
-/** Pick spatially spread unique visit labels (max N). */
+/** Prefer readable city / area name from visit. */
+export function cityLabelForVisit(v) {
+  const name = String(v?.name || '').trim();
+  const address = String(v?.address || '').trim();
+  if (address) {
+    const parts = address
+      .split(',')
+      .map((p) => p.trim())
+      .filter(Boolean)
+      .filter((p) => !/^\d{4,}$/.test(p) && !/^indonesia$/i.test(p));
+    // Prefer a mid/late segment that looks like a city/area (not street number)
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i];
+      if (p.length >= 3 && !/^(jl|jln|jalan|rt|rw)\b/i.test(p)) {
+        // If name is generic, use address city; else name if shorter/clearer
+        if (!name || /kunjungan|place|unknown/i.test(name)) return p;
+        if (parts.length >= 2 && i >= parts.length - 2) {
+          // keep place name if distinctive, else city
+          if (name.length <= 18) return name;
+          return p;
+        }
+      }
+    }
+  }
+  return name || 'Lokasi';
+}
+
 export function pickVisitLabels(visits, max = 12) {
   if (!visits?.length) return [];
   const seen = new Set();
   const uniq = [];
   for (const v of visits) {
-    const key = (v.name || '').trim().toLowerCase();
+    const label = cityLabelForVisit(v);
+    const key = label.toLowerCase();
     if (!key || seen.has(key)) continue;
     seen.add(key);
-    uniq.push(v);
+    uniq.push({ ...v, label });
   }
   if (uniq.length <= max) return uniq;
 
@@ -164,9 +253,7 @@ export function pickVisitLabels(visits, max = 12) {
     for (let i = 0; i < rest.length; i++) {
       const v = rest[i];
       let minD = Infinity;
-      for (const p of picked) {
-        minD = Math.min(minD, haversine(v, p));
-      }
+      for (const p of picked) minD = Math.min(minD, haversine(v, p));
       if (minD > bestD) {
         bestD = minD;
         bestI = i;
@@ -183,7 +270,7 @@ function resolveIcon(iconOpt, activity) {
   if (/sepeda|bicycle|bike/.test(a)) return 'bike';
   if (/jalan|walk|lari|run|foot/.test(a)) return 'walk';
   if (/motor|motorcycle/.test(a)) return 'motor';
-  if (/mobil|car|bus|kendaraan|vehicle|in_vehicle|mobil/.test(a)) return 'car';
+  if (/mobil|car|bus|kendaraan|vehicle|in_vehicle/.test(a)) return 'car';
   if (/kereta|train|mrt|subway|terbang|fly/.test(a)) return 'car';
   if (/diam|still|idle/.test(a)) return 'dot';
   return 'motor';
@@ -195,9 +282,11 @@ function drawIcon(ctx, type, x, y, angle, color) {
   ctx.rotate(angle);
   ctx.fillStyle = color;
   ctx.strokeStyle = '#fff';
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 2.25;
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
+  ctx.shadowColor = 'rgba(0,0,0,0.35)';
+  ctx.shadowBlur = 6;
 
   if (type === 'dot') {
     ctx.beginPath();
@@ -244,7 +333,8 @@ function drawIcon(ctx, type, x, y, angle, color) {
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
     ctx.fillRect(-6, -5, 10, 5);
     ctx.fillStyle = color;
     ctx.beginPath();
@@ -253,7 +343,6 @@ function drawIcon(ctx, type, x, y, angle, color) {
     ctx.fill();
     ctx.stroke();
   } else {
-    // motor
     ctx.beginPath();
     ctx.arc(-11, 8, 5.5, 0, Math.PI * 2);
     ctx.arc(12, 8, 5.5, 0, Math.PI * 2);
@@ -275,114 +364,6 @@ function drawIcon(ctx, type, x, y, angle, color) {
   ctx.restore();
 }
 
-function drawStylizedMap(ctx, w, h, filter, bounds, frames, labels) {
-  const g = ctx.createLinearGradient(0, 0, w, h);
-  g.addColorStop(0, filter.bg[0]);
-  g.addColorStop(1, filter.bg[1]);
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, w, h);
-
-  // land plate
-  ctx.fillStyle = filter.land || '#16352c';
-  ctx.globalAlpha = 0.55;
-  roundRect(ctx, 28, 24, w - 56, h - 48, 18);
-  ctx.fill();
-  ctx.globalAlpha = 1;
-
-  // soft city blobs around visits
-  for (const v of labels) {
-    const { x, y } = toXY(v, bounds, w, h);
-    const rg = ctx.createRadialGradient(x, y, 8, x, y, 90);
-    rg.addColorStop(0, 'rgba(94,196,160,0.18)');
-    rg.addColorStop(1, 'rgba(94,196,160,0)');
-    ctx.fillStyle = rg;
-    ctx.beginPath();
-    ctx.arc(x, y, 90, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // road grid
-  ctx.strokeStyle = filter.road || 'rgba(232,220,200,0.12)';
-  ctx.lineWidth = 1.25;
-  const cols = 10;
-  const rows = 7;
-  for (let i = 0; i <= cols; i++) {
-    const x = 40 + ((w - 80) * i) / cols;
-    ctx.beginPath();
-    ctx.moveTo(x, 36);
-    ctx.lineTo(x + (i % 2 ? 12 : -8), h - 36);
-    ctx.stroke();
-  }
-  for (let j = 0; j <= rows; j++) {
-    const y = 40 + ((h - 80) * j) / rows;
-    ctx.beginPath();
-    ctx.moveTo(36, y);
-    ctx.lineTo(w - 36, y + (j % 2 ? 10 : -6));
-    ctx.stroke();
-  }
-
-  // faint full route as "known road"
-  if (frames.length > 1) {
-    ctx.save();
-    ctx.strokeStyle = filter.road || 'rgba(232,220,200,0.2)';
-    ctx.lineWidth = 5;
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    ctx.globalAlpha = 0.35;
-    ctx.beginPath();
-    frames.forEach((p, i) => {
-      const { x, y } = toXY(p, bounds, w, h);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  // compass rose
-  ctx.save();
-  ctx.translate(w - 70, 70);
-  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-  ctx.fillStyle = 'rgba(255,255,255,0.45)';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.arc(0, 0, 18, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(0, -16);
-  ctx.lineTo(4, 2);
-  ctx.lineTo(0, -4);
-  ctx.lineTo(-4, 2);
-  ctx.closePath();
-  ctx.fill();
-  ctx.font = '600 11px "IBM Plex Sans", system-ui, sans-serif';
-  ctx.fillText('U', -4, -22);
-  ctx.restore();
-
-  // visit pins + city labels
-  ctx.font = '600 13px "IBM Plex Sans", system-ui, sans-serif';
-  for (const v of labels) {
-    const { x, y } = toXY(v, bounds, w, h);
-    ctx.beginPath();
-    ctx.arc(x, y, 5, 0, Math.PI * 2);
-    ctx.fillStyle = filter.stamp;
-    ctx.fill();
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-
-    const label = truncateLabel(v.name);
-    const tw = ctx.measureText(label).width;
-    const bx = x + 10;
-    const by = y - 18;
-    ctx.fillStyle = 'rgba(8,12,10,0.72)';
-    roundRect(ctx, bx - 6, by - 14, tw + 12, 22, 6);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.92)';
-    ctx.fillText(label, bx, by + 2);
-  }
-}
-
 function roundRect(ctx, x, y, w, h, r) {
   const rr = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
@@ -392,6 +373,34 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.arcTo(x, y + h, x, y, rr);
   ctx.arcTo(x, y, x + w, y, rr);
   ctx.closePath();
+}
+
+function drawCityLabels(ctx, merc, labels) {
+  ctx.font = '600 14px "IBM Plex Sans", system-ui, sans-serif';
+  for (const v of labels) {
+    const { x, y } = merc.toXY(v);
+    const label = truncateLabel(v.label || cityLabelForVisit(v));
+
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.fillStyle = ACCENT;
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    const tw = ctx.measureText(label).width;
+    const bx = x + 10;
+    const by = y - 16;
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    roundRect(ctx, bx - 6, by - 14, tw + 12, 24, 6);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = '#1a2420';
+    ctx.fillText(label, bx, by + 3);
+  }
 }
 
 function buildFrames(data) {
@@ -431,13 +440,13 @@ function buildFrames(data) {
   return frames;
 }
 
-function headingAngle(frames, index, bounds, w, h) {
-  const cur = toXY(frames[index], bounds, w, h);
-  const prev = toXY(frames[Math.max(0, index - 1)], bounds, w, h);
+function headingAngle(frames, index, merc) {
+  const cur = merc.toXY(frames[index]);
+  const prev = merc.toXY(frames[Math.max(0, index - 1)]);
   if (prev.x !== cur.x || prev.y !== cur.y) {
     return Math.atan2(cur.y - prev.y, cur.x - prev.x);
   }
-  const next = toXY(frames[Math.min(frames.length - 1, index + 1)], bounds, w, h);
+  const next = merc.toXY(frames[Math.min(frames.length - 1, index + 1)]);
   return Math.atan2(next.y - cur.y, next.x - cur.x);
 }
 
@@ -447,14 +456,42 @@ export function createVideoStudio(canvas) {
   let recorder = null;
   let chunks = [];
   let cancelled = false;
+  let mapCacheKey = '';
+  let mapCache = null;
 
   function renderFrame(frames, index, opts) {
-    const filter = FILTERS[opts.filter] || FILTERS.clean;
     const w = canvas.width;
     const h = canvas.height;
-    const bounds = project(frames);
+    const merc = opts.merc;
     const labels = opts.labels || [];
-    drawStylizedMap(ctx, w, h, filter, bounds, frames, labels);
+
+    if (opts.mapBg) {
+      ctx.drawImage(opts.mapBg, 0, 0, w, h);
+    } else {
+      ctx.fillStyle = '#dfe7ee';
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    if (!merc) return;
+
+    // faint full route
+    if (frames.length > 1) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(29,107,79,0.35)';
+      ctx.lineWidth = 4;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      frames.forEach((p, i) => {
+        const { x, y } = merc.toXY(p);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    drawCityLabels(ctx, merc, labels);
 
     const trail = Math.max(8, opts.trail || 40);
     const start = Math.max(0, index - trail);
@@ -463,30 +500,14 @@ export function createVideoStudio(canvas) {
     if (slice.length > 1) {
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
-      if (filter.glow) {
-        ctx.save();
-        ctx.shadowColor = filter.path || '#3d9b7a';
-        ctx.shadowBlur = 18;
-        ctx.strokeStyle = filter.path || '#3d9b7a';
-        ctx.lineWidth = 6;
-        ctx.beginPath();
-        slice.forEach((p, i) => {
-          const { x, y } = toXY(p, bounds, w, h);
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        });
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      ctx.lineWidth = 3.5;
+      ctx.lineWidth = 4;
       for (let i = 1; i < slice.length; i++) {
         const a = slice[i - 1];
         const b = slice[i];
-        const pa = toXY(a, bounds, w, h);
-        const pb = toXY(b, bounds, w, h);
-        ctx.strokeStyle = filter.path || a.color || '#3d9b7a';
-        ctx.globalAlpha = 0.35 + (i / slice.length) * 0.65;
+        const pa = merc.toXY(a);
+        const pb = merc.toXY(b);
+        ctx.strokeStyle = a.color || PATH_COLOR;
+        ctx.globalAlpha = 0.4 + (i / slice.length) * 0.6;
         ctx.beginPath();
         ctx.moveTo(pa.x, pa.y);
         ctx.lineTo(pb.x, pb.y);
@@ -497,66 +518,92 @@ export function createVideoStudio(canvas) {
 
     const cur = frames[index];
     if (cur) {
-      const { x, y } = toXY(cur, bounds, w, h);
+      const { x, y } = merc.toXY(cur);
       const icon = resolveIcon(opts.icon, cur.activity);
-      const angle = headingAngle(frames, index, bounds, w, h);
-      const color = filter.path || cur.color || '#e8b86d';
-      drawIcon(ctx, icon, x, y, angle, color);
+      const angle = headingAngle(frames, index, merc);
+      drawIcon(ctx, icon, x, y, angle, cur.color || ACCENT);
 
-      ctx.fillStyle = 'rgba(12,18,16,0.55)';
-      ctx.fillRect(32, 28, 420, 86);
-      ctx.fillStyle = filter.stamp;
-      ctx.font = '600 22px "Sora", system-ui, sans-serif';
-      ctx.fillText('Timeline', 48, 58);
-      ctx.font = '400 16px "IBM Plex Sans", system-ui, sans-serif';
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      ctx.fillText(formatStamp(cur.t), 48, 86);
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      roundRect(ctx, 28, 24, 400, 78, 10);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+      ctx.stroke();
+      ctx.fillStyle = PATH_COLOR;
+      ctx.font = '600 20px "Sora", system-ui, sans-serif';
+      ctx.fillText('Timeline', 44, 52);
+      ctx.font = '400 14px "IBM Plex Sans", system-ui, sans-serif';
+      ctx.fillStyle = '#334';
+      ctx.fillText(formatStamp(cur.t), 44, 76);
       if (cur.activity) {
-        ctx.fillStyle = 'rgba(255,255,255,0.55)';
-        ctx.font = '400 14px "IBM Plex Sans", system-ui, sans-serif';
-        ctx.fillText(cur.activity, 48, 108);
+        ctx.fillStyle = '#667';
+        ctx.font = '400 12px "IBM Plex Sans", system-ui, sans-serif';
+        ctx.fillText(cur.activity, 44, 94);
       }
 
       const prog = index / Math.max(1, frames.length - 1);
-      ctx.fillStyle = 'rgba(255,255,255,0.12)';
-      ctx.fillRect(32, h - 40, w - 64, 6);
-      ctx.fillStyle = filter.stamp;
-      ctx.fillRect(32, h - 40, (w - 64) * prog, 6);
-    }
-
-    if (filter.sepia) {
-      const img = ctx.getImageData(0, 0, w, h);
-      const d = img.data;
-      for (let i = 0; i < d.length; i += 4) {
-        const r = d[i],
-          g = d[i + 1],
-          b = d[i + 2];
-        d[i] = Math.min(255, r * 0.393 + g * 0.769 + b * 0.189);
-        d[i + 1] = Math.min(255, r * 0.349 + g * 0.686 + b * 0.168);
-        d[i + 2] = Math.min(255, r * 0.272 + g * 0.534 + b * 0.131);
-      }
-      ctx.putImageData(img, 0, 0);
+      ctx.fillStyle = 'rgba(0,0,0,0.2)';
+      ctx.fillRect(28, h - 28, w - 56, 6);
+      ctx.fillStyle = ACCENT;
+      ctx.fillRect(28, h - 28, (w - 56) * prog, 6);
     }
   }
 
-  function withLabels(data, opts) {
+  async function prepareScene(data, opts = {}, onMapProgress) {
+    const frames = buildFrames(data);
+    if (frames.length < 2) throw new Error('Butuh minimal 2 titik untuk video.');
+    const w = opts.width || 1280;
+    const h = opts.height || 720;
+    canvas.width = w;
+    canvas.height = h;
+
+    const bounds = boundsFromPoints(frames);
+    const labels = pickVisitLabels(data?.visits || [], 14);
+    const key = [
+      w,
+      h,
+      bounds.minLat.toFixed(4),
+      bounds.maxLat.toFixed(4),
+      bounds.minLng.toFixed(4),
+      bounds.maxLng.toFixed(4),
+    ].join('|');
+
+    let mapBg;
+    let merc;
+    if (mapCache && mapCacheKey === key) {
+      mapBg = mapCache.canvas;
+      merc = mapCache.merc;
+      onMapProgress?.(1);
+    } else {
+      const built = await buildStaticMap(bounds, w, h, onMapProgress);
+      mapBg = built.canvas;
+      merc = built.merc;
+      mapCache = built;
+      mapCacheKey = key;
+    }
+
     return {
-      ...opts,
-      labels: pickVisitLabels(data?.visits || [], 12),
+      frames,
+      fullOpts: {
+        ...opts,
+        labels,
+        mapBg,
+        merc,
+        width: w,
+        height: h,
+      },
     };
   }
 
-  function preview(data, opts = {}) {
+  async function preview(data, opts = {}) {
     cancel();
     cancelled = false;
-    const frames = buildFrames(data);
-    if (frames.length < 2) throw new Error('Butuh minimal 2 titik untuk video.');
-    const fullOpts = withLabels(data, opts);
-    canvas.width = fullOpts.width || 1280;
-    canvas.height = fullOpts.height || 720;
+    const { frames, fullOpts } = await prepareScene(data, opts);
+    if (cancelled) return { frames: frames.length };
+
     let i = 0;
     const speed = Number(fullOpts.speed) || 1;
     const tick = () => {
+      if (cancelled) return;
       const idx = Math.min(Math.floor(i), frames.length - 1);
       renderFrame(frames, idx, fullOpts);
       i += speed;
@@ -583,12 +630,11 @@ export function createVideoStudio(canvas) {
   async function exportVideo(data, opts = {}, onProgress) {
     cancel();
     cancelled = false;
-    const frames = buildFrames(data);
-    if (frames.length < 2) throw new Error('Butuh minimal 2 titik untuk video.');
-    const fullOpts = withLabels(data, opts);
+    const { frames, fullOpts } = await prepareScene(data, opts, (p) => {
+      onProgress?.(p * 0.08);
+    });
+    if (cancelled) throw new ExportCancelled();
 
-    canvas.width = fullOpts.width || 1280;
-    canvas.height = fullOpts.height || 720;
     const fps = fullOpts.fps || 30;
     const speed = Number(fullOpts.speed) || 1;
     const bits = fullOpts.videoBitsPerSecond || 4_000_000;
@@ -609,8 +655,7 @@ export function createVideoStudio(canvas) {
           reject(new ExportCancelled());
           return;
         }
-        const blob = new Blob(chunks, { type: mime.split(';')[0] });
-        resolve(blob);
+        resolve(new Blob(chunks, { type: mime.split(';')[0] }));
       };
       recorder.onerror = () => reject(new Error('Gagal merekam video'));
     });
@@ -625,7 +670,7 @@ export function createVideoStudio(canvas) {
         throw new ExportCancelled();
       }
       renderFrame(frames, Math.min(Math.floor(i), frames.length - 1), fullOpts);
-      if (onProgress) onProgress(i / frames.length);
+      if (onProgress) onProgress(0.08 + (i / frames.length) * 0.92);
       await new Promise((r) => setTimeout(r, 1000 / fps));
     }
     renderFrame(frames, frames.length - 1, fullOpts);
@@ -664,5 +709,3 @@ function pickRecorderMime(preferMp4) {
 export function supportsNativeMp4() {
   return pickRecorderMime(true).includes('mp4');
 }
-
-export { FILTERS };
