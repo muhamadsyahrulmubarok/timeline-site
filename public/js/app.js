@@ -1,14 +1,14 @@
-import { createTimelineMap } from './map.js?v=10';
+import { createTimelineMap } from './map.js?v=12';
 import {
   createVideoStudio,
   listFilters,
   RES_PRESETS,
   BITRATE_MULTIPLIERS,
   ExportCancelled,
-} from './video.js?v=10';
-import { getSampleTimeline } from './sample.js?v=10';
-import { parseTimelineJson, filterTimeline } from './parse.js?v=10';
-import { convertWebmToMp4, cancelConvert } from './ffmpeg-export.js?v=10';
+} from './video.js?v=12';
+import { getSampleTimeline } from './sample.js?v=12';
+import { parseTimelineJson, filterTimeline } from './parse.js?v=12';
+import { convertWebmToMp4, cancelConvert, preloadFfmpeg } from './ffmpeg-export.js?v=12';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -411,10 +411,27 @@ function openStudio() {
   document.body.classList.add('studio-open');
   try {
     runStudioPreview();
-    $('#studio-status').textContent = 'Preview looping…';
+    $('#studio-status').textContent = 'Preview looping… menyiapkan encoder di latar…';
   } catch (err) {
     $('#studio-status').textContent = err.message;
   }
+  // Warm encoder while user tweaks settings (gzip ~10MB first time, then cache)
+  preloadFfmpeg((info) => {
+    if (state.exporting || $('#studio').hidden) return;
+    const pct = Math.round((info.ratio || 0) * 100);
+    if (info.phase === 'ready') {
+      $('#studio-status').textContent = info.cached
+        ? 'Preview looping · encoder siap (cache)'
+        : 'Preview looping · encoder siap';
+      return;
+    }
+    setStudioProgress(
+      info.cached ? 'Encoder · cache' : 'Encoder · unduh',
+      (info.ratio || 0) * 0.35,
+      info.ratio || 0
+    );
+    $('#studio-status').textContent = `${info.label || 'Menyiapkan encoder…'} ${pct}%`;
+  });
 }
 
 function closeStudio() {
@@ -514,14 +531,21 @@ async function exportStudioVideo() {
       flag: state.exportFlag,
       onStatus: (msg) => {
         $('#studio-status').textContent = msg;
-        if (msg.includes('Mengunduh') || msg.includes('encoder')) {
-          setStudioProgress('Tahap 2/2 · Mengunduh encoder', 0.5, 0.1);
-        } else {
-          setStudioProgress('Tahap 2/2 · Mengonversi MP4', 0.55, 0);
-        }
+      },
+      onLoadProgress: (info) => {
+        const p = info.ratio || 0;
+        const overall = 0.48 + p * 0.12;
+        const stage =
+          info.phase === 'ready'
+            ? 'Tahap 2/2 · Encoder siap'
+            : info.cached
+              ? 'Tahap 2/2 · Memuat encoder (cache)'
+              : 'Tahap 2/2 · Mengunduh encoder';
+        setStudioProgress(stage, overall, p);
+        $('#studio-status').textContent = `${info.label || 'Encoder…'} ${Math.round(p * 100)}%`;
       },
       onProgress: (p) => {
-        const overall = 0.55 + p * 0.45;
+        const overall = 0.6 + p * 0.4;
         setStudioProgress('Tahap 2/2 · Mengonversi MP4', overall, p);
         $('#studio-status').textContent = `Mengonversi ke MP4… ${Math.round(p * 100)}%`;
       },

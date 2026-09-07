@@ -5,7 +5,7 @@
   "description": "Google Timeline visualizer — https://timeline.syahrul.web.id",
   "type": "module",
   "scripts": {
-    "vendor:ffmpeg": "mkdir -p public/vendor/ffmpeg && rm -rf public/vendor/ffmpeg/*-esm && cp -r node_modules/@ffmpeg/ffmpeg/dist/esm public/vendor/ffmpeg/ffmpeg-esm && cp -r node_modules/@ffmpeg/util/dist/esm public/vendor/ffmpeg/util-esm && cp -r node_modules/@ffmpeg/core/dist/esm public/vendor/ffmpeg/core-esm"
+    "vendor:ffmpeg": "mkdir -p public/vendor/ffmpeg && rm -rf public/vendor/ffmpeg/*-esm && cp -r node_modules/@ffmpeg/ffmpeg/dist/esm public/vendor/ffmpeg/ffmpeg-esm && cp -r node_modules/@ffmpeg/util/dist/esm public/vendor/ffmpeg/util-esm && cp -r node_modules/@ffmpeg/core/dist/esm public/vendor/ffmpeg/core-esm && gzip -9 -k -f public/vendor/ffmpeg/core-esm/ffmpeg-core.wasm public/vendor/ffmpeg/core-esm/ffmpeg-core.js"
   },
   "dependencies": {
     "@ffmpeg/core": "0.12.6",
