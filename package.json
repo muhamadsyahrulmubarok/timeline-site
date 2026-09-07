@@ -1,0 +1,15 @@
+{
+  "name": "timeline-site",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Google Timeline visualizer — https://timeline.syahrul.web.id",
+  "type": "module",
+  "scripts": {
+    "vendor:ffmpeg": "mkdir -p public/vendor/ffmpeg && rm -rf public/vendor/ffmpeg/*-esm && cp -r node_modules/@ffmpeg/ffmpeg/dist/esm public/vendor/ffmpeg/ffmpeg-esm && cp -r node_modules/@ffmpeg/util/dist/esm public/vendor/ffmpeg/util-esm && cp -r node_modules/@ffmpeg/core/dist/esm public/vendor/ffmpeg/core-esm"
+  },
+  "dependencies": {
+    "@ffmpeg/core": "0.12.6",
+    "@ffmpeg/ffmpeg": "0.12.10",
+    "@ffmpeg/util": "0.12.1"
+  }
+}
