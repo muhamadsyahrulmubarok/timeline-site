@@ -98,7 +98,7 @@
         </li>
         <li>
           <strong>Studio video + MP4</strong>
-          <span>Filter visual, trail, resolusi hingga 1440p, bitrate, progress jelas, dan batal kapan saja. WebM dirender dulu lalu dikonversi ke MP4 di browser.</span>
+          <span>Peta stylized dengan label kota, ikon motor/sepeda, kecepatan 0.5×–8×, resolusi hingga 1440p, progress jelas, batal kapan saja. WebM → MP4 di browser.</span>
         </li>
         <li>
           <strong>Privasi di perangkat</strong>
@@ -271,12 +271,23 @@
           <label class="field">Filter visual
             <select id="studio-filter"></select>
           </label>
-          <label class="field">Kecepatan render
+          <label class="field">Kecepatan video
             <select id="studio-speed">
-              <option value="1">Halus</option>
-              <option value="2" selected>Normal</option>
-              <option value="4">Cepat</option>
-              <option value="8">Sangat cepat</option>
+              <option value="0.5">0.5× (lambat)</option>
+              <option value="1" selected>1×</option>
+              <option value="2">2×</option>
+              <option value="4">4×</option>
+              <option value="8">8× (cepat)</option>
+            </select>
+          </label>
+          <label class="field">Ikon animasi
+            <select id="studio-icon">
+              <option value="auto" selected>Otomatis (dari aktivitas)</option>
+              <option value="motor">Motor</option>
+              <option value="car">Mobil</option>
+              <option value="bike">Sepeda</option>
+              <option value="walk">Jalan kaki</option>
+              <option value="dot">Titik</option>
             </select>
           </label>
           <label class="field">Panjang trail
@@ -318,6 +329,6 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
-  <script type="module" src="/js/app.js?v=12"></script>
+  <script type="module" src="/js/app.js?v=13"></script>
 </body>
 </html>

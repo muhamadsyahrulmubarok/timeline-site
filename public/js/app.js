@@ -1,14 +1,14 @@
-import { createTimelineMap } from './map.js?v=12';
+import { createTimelineMap } from './map.js?v=13';
 import {
   createVideoStudio,
   listFilters,
   RES_PRESETS,
   BITRATE_MULTIPLIERS,
   ExportCancelled,
-} from './video.js?v=12';
-import { getSampleTimeline } from './sample.js?v=12';
-import { parseTimelineJson, filterTimeline } from './parse.js?v=12';
-import { convertWebmToMp4, cancelConvert, preloadFfmpeg } from './ffmpeg-export.js?v=12';
+} from './video.js?v=13';
+import { getSampleTimeline } from './sample.js?v=13';
+import { parseTimelineJson, filterTimeline } from './parse.js?v=13';
+import { convertWebmToMp4, cancelConvert, preloadFfmpeg } from './ffmpeg-export.js?v=13';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -452,8 +452,9 @@ function getStudioOpts() {
   const videoBitsPerSecond = Math.round(preset.baseBitrate * mult);
   return {
     filter: $('#studio-filter').value,
-    speed: Number($('#studio-speed').value) || 2,
+    speed: Number($('#studio-speed').value) || 1,
     trail: Number($('#studio-trail').value) || 40,
+    icon: $('#studio-icon')?.value || 'auto',
     width: preset.width,
     height: preset.height,
     fps: 30,
@@ -734,7 +735,7 @@ function init() {
     opt.textContent = f.label;
     filterSel.appendChild(opt);
   }
-  ['studio-filter', 'studio-speed', 'studio-trail', 'studio-res', 'studio-bitrate'].forEach((id) => {
+  ['studio-filter', 'studio-speed', 'studio-trail', 'studio-res', 'studio-bitrate', 'studio-icon'].forEach((id) => {
     $(`#${id}`)?.addEventListener('change', () => {
       if ($('#studio').hidden) return;
       try {
