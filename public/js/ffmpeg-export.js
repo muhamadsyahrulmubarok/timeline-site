@@ -1,10 +1,7 @@
 /**
- * Client-side WebM → MP4 via ffmpeg.wasm (single-thread).
- * Progress listeners shared across preload + export; direct same-origin URLs (HTTP cache).
+ * WebM → MP4 via Muaz Khan ffmpeg_asm.js (asm.js worker).
+ * Based on: https://github.com/muaz-khan/Ffmpeg.js/blob/master/webm-to-mp4.html
  */
-
-import { FFmpeg } from '../vendor/ffmpeg/ffmpeg-esm/index.js';
-import { fetchFile } from '../vendor/ffmpeg/util-esm/index.js';
 
 export class ExportCancelled extends Error {
   constructor(message = 'Dibatalkan') {
@@ -13,17 +10,14 @@ export class ExportCancelled extends Error {
   }
 }
 
-const CORE_BASE = '/vendor/ffmpeg/core-esm';
-const CORE_JS = `${CORE_BASE}/ffmpeg-core.js`;
-const CORE_WASM = `${CORE_BASE}/ffmpeg-core.wasm`;
-/** Uncompressed wasm size (gzip ~10MB on wire). */
-const WASM_BYTES = 32_129_114;
+const ASM_URL = '/vendor/ffmpeg-asm/ffmpeg_asm.js';
+const WORKER_URL = '/js/ffmpeg-asm-worker.js';
 
-let ffmpeg = null;
-let loadPromise = null;
-let loadAbort = null;
-const progressListeners = new Set();
+let worker = null;
+let readyPromise = null;
+let ready = false;
 let converting = false;
+const progressListeners = new Set();
 
 function assertNotCancelled(flag) {
   if (flag?.cancelled) throw new ExportCancelled();
@@ -44,93 +38,30 @@ function subscribeProgress(fn) {
 }
 
 export function isFfmpegReady() {
-  return !!(ffmpeg && ffmpeg.loaded);
+  return ready && !!worker;
 }
 
-/** Warm HTTP cache without instantiating wasm yet (cheap). */
+/** Warm HTTP cache for ~4.5MB gzipped asm.js */
 export function prefetchEncoderAssets() {
-  const urls = [CORE_JS, CORE_WASM];
-  for (const url of urls) {
-    if (document.querySelector(`link[data-ffmpeg-preload="${url}"]`)) continue;
-    const link = document.createElement('link');
-    link.rel = 'preload';
-    link.as = 'fetch';
-    link.href = url;
-    link.crossOrigin = 'anonymous';
-    link.dataset.ffmpegPreload = url;
-    document.head.appendChild(link);
+  if (document.querySelector(`link[data-ffmpeg-preload="${ASM_URL}"]`)) {
+    fetch(ASM_URL, { credentials: 'same-origin', cache: 'force-cache' }).catch(() => {});
+    return;
   }
-  // Also kick fetch into HTTP cache (ignore body)
-  urls.forEach((url) => {
-    fetch(url, { credentials: 'same-origin', cache: 'force-cache' }).catch(() => {});
-  });
+  const link = document.createElement('link');
+  link.rel = 'preload';
+  link.as = 'script';
+  link.href = ASM_URL;
+  link.dataset.ffmpegPreload = ASM_URL;
+  document.head.appendChild(link);
+  fetch(ASM_URL, { credentials: 'same-origin', cache: 'force-cache' }).catch(() => {});
+}
+
+function createWorker() {
+  return new Worker(WORKER_URL);
 }
 
 /**
- * Track download of wasm via fetch for UX; result discarded (HTTP cache warms).
- * Real load uses same URL so browser reuses cache.
- */
-async function warmWasmWithProgress(flag, signal) {
-  notify({ phase: 'download', ratio: 0.02, cached: false, label: 'Mengunduh encoder…' });
-
-  // Cache API fast path
-  try {
-    const cache = await caches.open('timeline-ffmpeg-v2');
-    const hit = await cache.match(CORE_WASM);
-    if (hit) {
-      notify({ phase: 'download', ratio: 0.85, cached: true, label: 'Encoder di cache…' });
-      return true;
-    }
-  } catch (_) {}
-
-  const res = await fetch(CORE_WASM, { signal, credentials: 'same-origin' });
-  if (!res.ok) throw new Error(`Gagal unduh encoder (${res.status})`);
-
-  const encodedLen = Number(res.headers.get('Content-Length')) || 0;
-  // Prefer compressed length for progress when gzip (matches network feel on mobile)
-  const total = encodedLen || WASM_BYTES;
-  let received = 0;
-  let cached = false;
-
-  if (!res.body?.getReader) {
-    await res.arrayBuffer();
-    notify({ phase: 'download', ratio: 0.85, cached: false, label: 'Unduhan encoder selesai' });
-    return false;
-  }
-
-  const reader = res.body.getReader();
-  // If browser auto-decompressed, Content-Length is compressed but chunks are full size.
-  // Cap ratio using max(received/total, received/WASM_BYTES) carefully:
-  const useUncompressed = !res.headers.get('Content-Encoding') && !encodedLen;
-  const denom = useUncompressed ? WASM_BYTES : total;
-
-  while (true) {
-    assertNotCancelled(flag);
-    const { done, value } = await reader.read();
-    if (done) break;
-    received += value.byteLength;
-    const ratio = Math.min(0.85, received / Math.max(denom, 1));
-    notify({
-      phase: 'download',
-      ratio,
-      cached: false,
-      label: `Mengunduh encoder… ${Math.round(ratio * 100)}%`,
-    });
-  }
-
-  try {
-    const cache = await caches.open('timeline-ffmpeg-v2');
-    // Re-fetch from HTTP cache into Cache API for next time (opaque-ish)
-    const cachedRes = await fetch(CORE_WASM, { credentials: 'same-origin', cache: 'force-cache' });
-    if (cachedRes.ok) await cache.put(CORE_WASM, cachedRes.clone());
-    cached = true;
-  } catch (_) {}
-
-  notify({ phase: 'download', ratio: 0.88, cached, label: 'Unduhan encoder selesai' });
-  return cached;
-}
-
-/**
+ * Load ffmpeg_asm.js inside worker (fires once → type: ready).
  * @param {(info: object) => void} [onProgress]
  * @param {{ cancelled?: boolean }} [flag]
  */
@@ -139,100 +70,98 @@ export async function ensureFfmpeg(onProgress, flag) {
   const unsub = subscribeProgress(onProgress);
 
   try {
-    if (ffmpeg?.loaded) {
+    if (isFfmpegReady()) {
       notify({ phase: 'ready', ratio: 1, cached: true, label: 'Encoder siap' });
-      return ffmpeg;
+      return worker;
     }
 
-    if (!loadPromise) {
-      loadAbort = new AbortController();
-      const signal = loadAbort.signal;
+    if (!readyPromise) {
+      prefetchEncoderAssets();
+      notify({
+        phase: 'download',
+        ratio: 0.05,
+        cached: false,
+        label: 'Mengunduh encoder (ffmpeg_asm.js)…',
+      });
 
-      loadPromise = (async () => {
-        assertNotCancelled(flag);
-        let fromCache = false;
+      const started = Date.now();
+      readyPromise = new Promise((resolve, reject) => {
         try {
-          fromCache = await warmWasmWithProgress(flag, signal);
+          worker = createWorker();
         } catch (err) {
-          if (flag?.cancelled || err?.name === 'AbortError') throw new ExportCancelled();
-          // Still try direct load — HTTP cache / previous visit may help
-          notify({
-            phase: 'download',
-            ratio: 0.5,
-            cached: false,
-            label: 'Mencoba muat encoder…',
-          });
+          readyPromise = null;
+          reject(err);
+          return;
         }
 
-        assertNotCancelled(flag);
-        notify({
-          phase: 'init',
-          ratio: 0.9,
-          cached: fromCache,
-          label: 'Menyiapkan encoder di perangkat…',
-        });
-
-        const instance = new FFmpeg();
-        const started = Date.now();
         const beat = setInterval(() => {
           if (flag?.cancelled) return;
           const sec = Math.round((Date.now() - started) / 1000);
-          const pulse = 0.9 + Math.min(0.08, sec / 120);
           notify({
-            phase: 'init',
-            ratio: pulse,
-            cached: fromCache,
-            label: `Menyiapkan encoder di perangkat… ${sec}d`,
+            phase: 'download',
+            ratio: Math.min(0.9, 0.1 + sec / 40),
+            cached: false,
+            label: `Menyiapkan encoder… ${sec}d`,
           });
-        }, 500);
+        }, 400);
 
-        try {
-          // Same-origin URLs — browser HTTP cache; no 31MB blob copy
-          await instance.load({
-            coreURL: CORE_JS,
-            wasmURL: CORE_WASM,
-          });
-        } finally {
-          clearInterval(beat);
-        }
+        const onMsg = (event) => {
+          const message = event.data;
+          if (message.type === 'ready') {
+            clearInterval(beat);
+            worker.removeEventListener('message', onMsg);
+            ready = true;
+            notify({ phase: 'ready', ratio: 1, cached: true, label: 'Encoder siap' });
+            resolve(worker);
+          } else if (message.type === 'stdout') {
+            // optional log during load
+          }
+        };
 
-        assertNotCancelled(flag);
-        ffmpeg = instance;
-        notify({
-          phase: 'ready',
-          ratio: 1,
-          cached: fromCache,
-          label: fromCache ? 'Encoder siap (cache)' : 'Encoder siap',
-        });
-        return instance;
-      })().catch((err) => {
-        loadPromise = null;
-        loadAbort = null;
-        if (flag?.cancelled || err?.name === 'AbortError' || err?.name === 'ExportCancelled') {
-          throw new ExportCancelled();
-        }
+        worker.addEventListener('message', onMsg);
+        worker.addEventListener(
+          'error',
+          (err) => {
+            clearInterval(beat);
+            readyPromise = null;
+            ready = false;
+            try {
+              worker.terminate();
+            } catch (_) {}
+            worker = null;
+            reject(err?.message ? new Error(err.message) : new Error('Gagal muat encoder'));
+          },
+          { once: true }
+        );
+      }).catch((err) => {
+        readyPromise = null;
         throw err;
       });
     } else {
       notify({
         phase: 'init',
-        ratio: 0.9,
+        ratio: 0.85,
         cached: true,
-        label: 'Menyiapkan encoder di perangkat…',
+        label: 'Menyiapkan encoder…',
       });
     }
 
-    // Watch export cancel → abort in-flight warm fetch
     const watch = setInterval(() => {
-      if (flag?.cancelled && loadAbort) {
+      if (flag?.cancelled) {
         try {
-          loadAbort.abort();
+          worker?.terminate();
         } catch (_) {}
+        worker = null;
+        ready = false;
+        readyPromise = null;
       }
     }, 200);
 
     try {
-      return await loadPromise;
+      assertNotCancelled(flag);
+      await readyPromise;
+      assertNotCancelled(flag);
+      return worker;
     } finally {
       clearInterval(watch);
     }
@@ -246,34 +175,45 @@ export function preloadFfmpeg(onProgress) {
   const flag = { cancelled: false };
   return ensureFfmpeg(onProgress, flag).catch((err) => {
     if (err?.name === 'ExportCancelled') return null;
-    console.warn('ffmpeg preload', err);
+    console.warn('ffmpeg_asm preload', err);
     return null;
   });
 }
 
-/**
- * Cancel in-flight convert / load. Prefer soft abort during download;
- * terminate only if converting or hard reset needed.
- */
-export function cancelConvert(hard = true) {
-  try {
-    loadAbort?.abort();
-  } catch (_) {}
-  loadAbort = null;
-
-  if (hard || converting) {
-    if (ffmpeg) {
-      try {
-        ffmpeg.terminate();
-      } catch (_) {}
-    }
-    ffmpeg = null;
-    loadPromise = null;
-  }
+export function cancelConvert() {
   converting = false;
+  if (worker) {
+    try {
+      worker.terminate();
+    } catch (_) {}
+  }
+  worker = null;
+  ready = false;
+  readyPromise = null;
+}
+
+function parseStdoutProgress(line, onProgress) {
+  if (!onProgress || !line) return;
+  // e.g. frame=  120 fps=... time=00:00:04.00
+  const timeMatch = String(line).match(/time=\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+  if (timeMatch) {
+    const sec =
+      Number(timeMatch[1]) * 3600 + Number(timeMatch[2]) * 60 + Number(timeMatch[3]);
+    // unknown duration — pulse upward gently
+    onProgress(Math.min(0.95, 0.15 + sec / 60));
+    return;
+  }
+  const frameMatch = String(line).match(/frame=\s*(\d+)/);
+  if (frameMatch) {
+    const frame = Number(frameMatch[1]);
+    onProgress(Math.min(0.95, 0.1 + frame / 800));
+  }
 }
 
 /**
+ * Convert WebM blob → MP4 using ffmpeg_asm.js
+ * Command pattern from Muaz demo, bitrate adjustable.
+ *
  * @param {Blob} webmBlob
  * @param {{ bitrate?: number, fps?: number, onProgress?: (ratio: number) => void, onStatus?: (msg: string) => void, onLoadProgress?: Function, flag?: { cancelled?: boolean } }} opts
  */
@@ -281,69 +221,88 @@ export async function convertWebmToMp4(webmBlob, opts = {}) {
   const flag = opts.flag || {};
   assertNotCancelled(flag);
 
-  const instance = await ensureFfmpeg(opts.onLoadProgress || ((info) => opts.onStatus?.(info.label)), flag);
+  const w = await ensureFfmpeg(opts.onLoadProgress || ((info) => opts.onStatus?.(info.label)), flag);
   assertNotCancelled(flag);
 
-  const onProgress = ({ progress }) => {
-    if (flag.cancelled) return;
-    opts.onProgress?.(Math.min(1, Math.max(0, progress || 0)));
-  };
-  instance.on('progress', onProgress);
-
-  const inName = 'input.webm';
-  const outName = 'output.mp4';
-  const bitrate = opts.bitrate || 8_000_000;
-  const fps = opts.fps || 30;
   converting = true;
+  opts.onStatus?.('Mengonversi ke MP4…');
+  opts.onLoadProgress?.({
+    phase: 'ready',
+    ratio: 1,
+    cached: true,
+    label: 'Encoder siap — konversi…',
+  });
 
-  try {
-    opts.onStatus?.('Mengonversi ke MP4…');
-    await instance.writeFile(inName, await fetchFile(webmBlob));
-    assertNotCancelled(flag);
+  const buffer = await webmBlob.arrayBuffer();
+  assertNotCancelled(flag);
 
-    const bitrateStr = `${Math.round(bitrate / 1000)}k`;
-    const code = await instance.exec([
-      '-i',
-      inName,
-      '-c:v',
-      'libx264',
-      '-preset',
-      'ultrafast',
-      '-b:v',
-      bitrateStr,
-      '-maxrate',
-      bitrateStr,
-      '-bufsize',
-      `${Math.round((bitrate * 2) / 1000)}k`,
-      '-r',
-      String(fps),
-      '-pix_fmt',
-      'yuv420p',
-      '-movflags',
-      '+faststart',
-      '-an',
-      outName,
-    ]);
-    assertNotCancelled(flag);
+  const bitrateKb = Math.max(500, Math.round((opts.bitrate || 6_400_000) / 1000));
+  // Same codec path as Muaz webm-to-mp4.html (mpeg4), bitrate from studio preset
+  const args = `-i video.webm -c:v mpeg4 -b:v ${bitrateKb}k -an -strict experimental output.mp4`.split(
+    ' '
+  );
 
-    if (code !== 0) throw new Error(`ffmpeg gagal (kode ${code})`);
+  return new Promise((resolve, reject) => {
+    if (!w) {
+      converting = false;
+      reject(new Error('Encoder tidak siap'));
+      return;
+    }
 
-    const data = await instance.readFile(outName);
-    opts.onProgress?.(1);
-    return new Blob([data.buffer], { type: 'video/mp4' });
-  } catch (err) {
-    if (flag.cancelled || err?.name === 'ExportCancelled') throw new ExportCancelled();
-    throw err;
-  } finally {
-    converting = false;
+    const onMsg = (event) => {
+      const message = event.data;
+      if (flag.cancelled) {
+        w.removeEventListener('message', onMsg);
+        converting = false;
+        reject(new ExportCancelled());
+        return;
+      }
+
+      if (message.type === 'stdout') {
+        parseStdoutProgress(message.data, opts.onProgress);
+        const text = String(message.data || '');
+        if (/frame=|time=|video:|Output|Opening/i.test(text)) {
+          opts.onStatus?.(text.length > 80 ? `${text.slice(0, 77)}…` : text);
+        }
+      } else if (message.type === 'start') {
+        opts.onStatus?.('ffmpeg: konversi dimulai…');
+        opts.onProgress?.(0.05);
+      } else if (message.type === 'done') {
+        w.removeEventListener('message', onMsg);
+        converting = false;
+        try {
+          const result = message.data?.[0];
+          if (!result?.data) {
+            reject(new Error('Konversi gagal — tidak ada output MP4'));
+            return;
+          }
+          const bytes = result.data instanceof Uint8Array ? result.data : new Uint8Array(result.data);
+          opts.onProgress?.(1);
+          resolve(new Blob([bytes], { type: 'video/mp4' }));
+        } catch (err) {
+          reject(err);
+        }
+      }
+    };
+
+    w.addEventListener('message', onMsg);
+
     try {
-      instance.off('progress', onProgress);
-    } catch (_) {}
-    try {
-      await instance.deleteFile(inName);
-    } catch (_) {}
-    try {
-      await instance.deleteFile(outName);
-    } catch (_) {}
-  }
+      w.postMessage({
+        type: 'command',
+        arguments: args,
+        TOTAL_MEMORY: 268435456,
+        files: [
+          {
+            data: new Uint8Array(buffer),
+            name: 'video.webm',
+          },
+        ],
+      });
+    } catch (err) {
+      w.removeEventListener('message', onMsg);
+      converting = false;
+      reject(err);
+    }
+  });
 }

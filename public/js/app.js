@@ -1,4 +1,4 @@
-import { createTimelineMap } from './map.js?v=14';
+import { createTimelineMap } from './map.js?v=15';
 import {
   createVideoStudio,
   listFilters,
@@ -6,16 +6,16 @@ import {
   BITRATE_MULTIPLIERS,
   ExportCancelled,
   supportsNativeMp4,
-} from './video.js?v=14';
-import { getSampleTimeline } from './sample.js?v=14';
-import { parseTimelineJson, filterTimeline } from './parse.js?v=14';
+} from './video.js?v=15';
+import { getSampleTimeline } from './sample.js?v=15';
+import { parseTimelineJson, filterTimeline } from './parse.js?v=15';
 import {
   convertWebmToMp4,
   cancelConvert,
   preloadFfmpeg,
   prefetchEncoderAssets,
   isFfmpegReady,
-} from './ffmpeg-export.js?v=14';
+} from './ffmpeg-export.js?v=15';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
