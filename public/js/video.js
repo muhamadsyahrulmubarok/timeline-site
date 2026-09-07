@@ -595,11 +595,8 @@ export function createVideoStudio(canvas) {
     const stream = canvas.captureStream(fps);
     chunks = [];
 
-    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-      ? 'video/webm;codecs=vp9'
-      : MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
-        ? 'video/webm;codecs=vp8'
-        : 'video/webm';
+    const mime = pickRecorderMime(fullOpts.preferMp4 !== false);
+    const isMp4 = mime.includes('mp4');
 
     recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bits });
     recorder.ondataavailable = (e) => {
@@ -612,7 +609,7 @@ export function createVideoStudio(canvas) {
           reject(new ExportCancelled());
           return;
         }
-        const blob = new Blob(chunks, { type: mime });
+        const blob = new Blob(chunks, { type: mime.split(';')[0] });
         resolve(blob);
       };
       recorder.onerror = () => reject(new Error('Gagal merekam video'));
@@ -639,10 +636,33 @@ export function createVideoStudio(canvas) {
     recorder.stop();
     const blob = await done;
     if (onProgress) onProgress(1);
+    blob._timelineIsMp4 = isMp4;
     return blob;
   }
 
-  return { preview, exportVideo, cancel, renderFrame, listFilters };
+  return { preview, exportVideo, cancel, renderFrame, listFilters, supportsNativeMp4 };
+}
+
+function pickRecorderMime(preferMp4) {
+  const mp4 = [
+    'video/mp4;codecs=avc1.42E01E',
+    'video/mp4;codecs=avc1.4D401E',
+    'video/mp4',
+  ];
+  const webm = [
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
+    'video/webm',
+  ];
+  const order = preferMp4 ? [...mp4, ...webm] : [...webm, ...mp4];
+  for (const m of order) {
+    if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m)) return m;
+  }
+  return 'video/webm';
+}
+
+export function supportsNativeMp4() {
+  return pickRecorderMime(true).includes('mp4');
 }
 
 export { FILTERS };

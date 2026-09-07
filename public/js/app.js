@@ -1,14 +1,21 @@
-import { createTimelineMap } from './map.js?v=13';
+import { createTimelineMap } from './map.js?v=14';
 import {
   createVideoStudio,
   listFilters,
   RES_PRESETS,
   BITRATE_MULTIPLIERS,
   ExportCancelled,
-} from './video.js?v=13';
-import { getSampleTimeline } from './sample.js?v=13';
-import { parseTimelineJson, filterTimeline } from './parse.js?v=13';
-import { convertWebmToMp4, cancelConvert, preloadFfmpeg } from './ffmpeg-export.js?v=13';
+  supportsNativeMp4,
+} from './video.js?v=14';
+import { getSampleTimeline } from './sample.js?v=14';
+import { parseTimelineJson, filterTimeline } from './parse.js?v=14';
+import {
+  convertWebmToMp4,
+  cancelConvert,
+  preloadFfmpeg,
+  prefetchEncoderAssets,
+  isFfmpegReady,
+} from './ffmpeg-export.js?v=14';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -411,22 +418,31 @@ function openStudio() {
   document.body.classList.add('studio-open');
   try {
     runStudioPreview();
-    $('#studio-status').textContent = 'Preview looping… menyiapkan encoder di latar…';
+    $('#studio-status').textContent = supportsNativeMp4()
+      ? 'Preview looping · MP4 native (tanpa unduh encoder)'
+      : 'Preview looping… menyiapkan encoder di latar…';
   } catch (err) {
     $('#studio-status').textContent = err.message;
   }
-  // Warm encoder while user tweaks settings (gzip ~10MB first time, then cache)
+
+  if (supportsNativeMp4()) return;
+
+  // Prefetch + init ffmpeg while user tweaks settings
+  prefetchEncoderAssets();
   preloadFfmpeg((info) => {
-    if (state.exporting || $('#studio').hidden) return;
+    if ($('#studio').hidden) return;
     const pct = Math.round((info.ratio || 0) * 100);
+    if (state.exporting) {
+      // Export UI owns the status; still allow progress via convert listeners
+      return;
+    }
     if (info.phase === 'ready') {
-      $('#studio-status').textContent = info.cached
-        ? 'Preview looping · encoder siap (cache)'
-        : 'Preview looping · encoder siap';
+      $('#studio-status').textContent = 'Preview looping · encoder siap';
+      setStudioProgress('Encoder siap', 0, 1);
       return;
     }
     setStudioProgress(
-      info.cached ? 'Encoder · cache' : 'Encoder · unduh',
+      info.phase === 'init' ? 'Encoder · siapkan' : info.cached ? 'Encoder · cache' : 'Encoder · unduh',
       (info.ratio || 0) * 0.35,
       info.ratio || 0
     );
@@ -505,28 +521,57 @@ async function exportStudioVideo() {
   state.exportFlag = { cancelled: false };
   setExportUi(true);
 
-  let webmBlob = null;
+  let renderBlob = null;
   const opts = getStudioOpts();
   const stamp = Date.now();
+  const nativeMp4 = supportsNativeMp4();
 
   try {
     if (!state.view) throw new Error('Belum ada data timeline. Import JSON dulu.');
 
-    setStudioProgress('Tahap 1/2 · Merender WebM', 0, 0);
+    if (nativeMp4) {
+      setStudioProgress('Merender MP4', 0, 0);
+      $('#studio-status').textContent = 'Merender MP4 (native)…';
+      renderBlob = await ensureStudio().exportVideo(state.view, { ...opts, preferMp4: true }, (p) => {
+        setStudioProgress('Merender MP4', p, p);
+        $('#studio-status').textContent = `Merender MP4… ${Math.round(p * 100)}%`;
+      });
+      if (state.exportFlag.cancelled) throw new ExportCancelled();
+      downloadBlob(renderBlob, `timeline-${stamp}.mp4`);
+      setStudioProgress('Selesai', 1, 1);
+      $('#studio-status').textContent = 'Selesai — MP4 terunduh (native, tanpa encoder).';
+      return;
+    }
+
+    setStudioProgress('Tahap 1/2 · Merender', 0, 0);
     $('#studio-status').textContent = 'Merender video…';
 
-    webmBlob = await ensureStudio().exportVideo(state.view, opts, (p) => {
+    renderBlob = await ensureStudio().exportVideo(state.view, { ...opts, preferMp4: false }, (p) => {
       const overall = p * 0.45;
-      setStudioProgress('Tahap 1/2 · Merender WebM', overall, p);
+      setStudioProgress('Tahap 1/2 · Merender', overall, p);
       $('#studio-status').textContent = `Merender… ${Math.round(p * 100)}%`;
     });
 
     if (state.exportFlag.cancelled) throw new ExportCancelled();
 
-    setStudioProgress('Tahap 2/2 · Encoder', 0.48, 0);
-    $('#studio-status').textContent = 'Menyiapkan encoder…';
+    if (renderBlob.type.includes('mp4') || renderBlob._timelineIsMp4) {
+      downloadBlob(renderBlob, `timeline-${stamp}.mp4`);
+      setStudioProgress('Selesai', 1, 1);
+      $('#studio-status').textContent = 'Selesai — MP4 terunduh.';
+      return;
+    }
 
-    const mp4Blob = await convertWebmToMp4(webmBlob, {
+    showWebmFallback(renderBlob);
+
+    if (isFfmpegReady()) {
+      setStudioProgress('Tahap 2/2 · Konversi', 0.5, 0);
+      $('#studio-status').textContent = 'Encoder siap — mengonversi…';
+    } else {
+      setStudioProgress('Tahap 2/2 · Encoder', 0.48, 0);
+      $('#studio-status').textContent = 'Menyiapkan encoder…';
+    }
+
+    const mp4Blob = await convertWebmToMp4(renderBlob, {
       bitrate: opts.videoBitsPerSecond,
       fps: opts.fps,
       flag: state.exportFlag,
@@ -536,14 +581,13 @@ async function exportStudioVideo() {
       onLoadProgress: (info) => {
         const p = info.ratio || 0;
         const overall = 0.48 + p * 0.12;
-        const stage =
-          info.phase === 'ready'
-            ? 'Tahap 2/2 · Encoder siap'
-            : info.cached
-              ? 'Tahap 2/2 · Memuat encoder (cache)'
-              : 'Tahap 2/2 · Mengunduh encoder';
+        let stage = 'Tahap 2/2 · Encoder';
+        if (info.phase === 'ready') stage = 'Tahap 2/2 · Encoder siap';
+        else if (info.phase === 'init') stage = 'Tahap 2/2 · Menyiapkan encoder';
+        else if (info.cached) stage = 'Tahap 2/2 · Cache encoder';
+        else stage = 'Tahap 2/2 · Mengunduh encoder';
         setStudioProgress(stage, overall, p);
-        $('#studio-status').textContent = `${info.label || 'Encoder…'} ${Math.round(p * 100)}%`;
+        $('#studio-status').textContent = info.label || 'Encoder…';
       },
       onProgress: (p) => {
         const overall = 0.6 + p * 0.4;
@@ -555,6 +599,7 @@ async function exportStudioVideo() {
     downloadBlob(mp4Blob, `timeline-${stamp}.mp4`);
     setStudioProgress('Selesai', 1, 1);
     $('#studio-status').textContent = 'Selesai — MP4 terunduh.';
+    hideWebmFallback();
   } catch (err) {
     if (err?.name === 'ExportCancelled' || state.exportFlag.cancelled) {
       setStudioProgress('Dibatalkan', 0, 0);
@@ -564,9 +609,9 @@ async function exportStudioVideo() {
       const msg = err.message || 'Gagal export';
       $('#studio-status').textContent = msg;
       setStudioProgress('Gagal', $('#studio-progress')?.value || 0, 0);
-      if (webmBlob) {
-        showWebmFallback(webmBlob);
-        $('#studio-status').textContent = `${msg} — kamu bisa unduh WebM hasil tahap 1.`;
+      if (renderBlob && !String(renderBlob.type || '').includes('mp4')) {
+        showWebmFallback(renderBlob);
+        $('#studio-status').textContent = `${msg} — kamu bisa unduh WebM sekarang.`;
       }
     }
   } finally {
@@ -757,6 +802,13 @@ function init() {
       if (isMobileLayout()) setPanelOpen(true);
     });
   });
+
+  // Prefetch encoder into HTTP cache early (skip if browser can record MP4 natively)
+  if (!supportsNativeMp4()) {
+    const warm = () => prefetchEncoderAssets();
+    if ('requestIdleCallback' in window) requestIdleCallback(warm, { timeout: 5000 });
+    else setTimeout(warm, 2500);
+  }
 }
 
 init();
