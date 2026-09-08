@@ -1,20 +1,21 @@
-import { createTimelineMap } from './map.js?v=16';
+import { createTimelineMap } from './map.js?v=18';
 import {
   createVideoStudio,
   RES_PRESETS,
   BITRATE_MULTIPLIERS,
   ExportCancelled,
   supportsNativeMp4,
-} from './video.js?v=16';
-import { getSampleTimeline } from './sample.js?v=16';
-import { parseTimelineJson, filterTimeline } from './parse.js?v=16';
+} from './video.js?v=18';
+import { getSampleTimeline } from './sample.js?v=18';
+import { parseTimelineJson, filterTimeline } from './parse.js?v=18';
 import {
   convertWebmToMp4,
   cancelConvert,
   preloadFfmpeg,
   prefetchEncoderAssets,
   isFfmpegReady,
-} from './ffmpeg-export.js?v=16';
+} from './ffmpeg-export.js?v=18';
+import { initLandingPreview } from './landing-preview.js?v=18';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -244,7 +245,10 @@ async function handleFile(file) {
   } catch (err) {
     console.error(err);
     hideLoader();
-    const msg = err.message || 'Gagal memuat file';
+    let msg = err.message || 'Gagal memuat file';
+    if (/json|parse|unexpected|format|syntax/i.test(msg)) {
+      msg = 'Format file belum dikenali. Pilih file JSON hasil export Google Timeline.';
+    }
     if (status) {
       status.textContent = msg;
       status.dataset.state = 'error';
@@ -649,9 +653,31 @@ function setupDnD() {
   });
 }
 
+function setupNav() {
+  const nav = document.querySelector('.landing-nav');
+  const toggle = $('#nav-toggle');
+  if (!nav || !toggle) return;
+  const close = () => {
+    nav.classList.remove('is-open');
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.setAttribute('aria-label', 'Buka menu');
+  };
+  toggle.addEventListener('click', () => {
+    const open = !nav.classList.contains('is-open');
+    nav.classList.toggle('is-open', open);
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.setAttribute('aria-label', open ? 'Tutup menu' : 'Buka menu');
+  });
+  nav.querySelectorAll('.nav-link, .nav-cta').forEach((link) => {
+    link.addEventListener('click', close);
+  });
+}
+
 function init() {
   state.map = createTimelineMap($('#map'));
   setupDnD();
+  setupNav();
+  initLandingPreview();
 
   $('#file-input').addEventListener('change', (e) => {
     const file = e.target.files?.[0];

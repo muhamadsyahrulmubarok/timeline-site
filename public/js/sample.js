@@ -1,5 +1,18 @@
 /** Demo sample — weekend trip around Jakarta (fictional). */
 
+/** Compact lat/lng path for landing hero preview (clearly demonstrative). */
+export function getPreviewRoute() {
+  return [
+    { lat: -6.244, lng: 106.799, label: 'Kemang' },
+    { lat: -6.22, lng: 106.82 },
+    { lat: -6.2088, lng: 106.8456 },
+    { lat: -6.1944, lng: 106.8229 },
+    { lat: -6.1754, lng: 106.8272, label: 'Monas' },
+    { lat: -6.15, lng: 106.83 },
+    { lat: -6.1225, lng: 106.842, label: 'Ancol' },
+  ];
+}
+
 export function getSampleTimeline() {
   const day = (d, h, m = 0) => Date.parse(`2025-06-0${d}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00+07:00`);
 

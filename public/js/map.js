@@ -3,22 +3,22 @@
  */
 
 const ACTIVITY_COLORS = {
-  'Jalan kaki': '#5ec4a0',
+  'Jalan kaki': '#64d8ab',
   Lari: '#f07178',
   Sepeda: '#7aa2f7',
-  Kendaraan: '#e8b86d',
-  Mobil: '#e8b86d',
+  Kendaraan: '#e8bc76',
+  Mobil: '#e8bc76',
   Motor: '#ff9e64',
   Bus: '#bb9af7',
   Kereta: '#7dcfff',
   'MRT/Subway': '#7dcfff',
   Terbang: '#c0caf5',
   Diam: '#565f89',
-  Perjalanan: '#3d9b7a',
+  Perjalanan: '#64d8ab',
 };
 
 export function activityColor(name) {
-  return ACTIVITY_COLORS[name] || '#3d9b7a';
+  return ACTIVITY_COLORS[name] || '#64d8ab';
 }
 
 export function createTimelineMap(container) {
@@ -125,7 +125,7 @@ export function createTimelineMap(container) {
         const slice = path.slice(i, Math.min(path.length, i + chunk + 1));
         const latlngs = slice.map((p) => [p.lat, p.lng]);
         L.polyline(latlngs, {
-          color: '#3d9b7a',
+          color: '#64d8ab',
           weight: 3,
           opacity: 0.8,
           lineJoin: 'round',
@@ -146,7 +146,7 @@ export function createTimelineMap(container) {
         radius: 7,
         color: '#0c1210',
         weight: 2,
-        fillColor: '#e8b86d',
+        fillColor: '#e8bc76',
         fillOpacity: 0.95,
       });
       const when = new Date(v.t).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
@@ -165,8 +165,8 @@ export function createTimelineMap(container) {
         maxZoom: 16,
         gradient: {
           0.2: '#1a3a32',
-          0.45: '#3d9b7a',
-          0.7: '#e8b86d',
+          0.45: '#64d8ab',
+          0.7: '#e8bc76',
           1: '#f07178',
         },
       }).addTo(map);
@@ -191,14 +191,14 @@ export function createTimelineMap(container) {
     if (trail.length > 1) {
       trailLine = L.polyline(
         trail.map((p) => [p.lat, p.lng]),
-        { color: '#e8b86d', weight: 4, opacity: 0.95 }
+        { color: '#e8bc76', weight: 4, opacity: 0.95 }
       ).addTo(playLayer);
     }
     playMarker = L.circleMarker([point.lat, point.lng], {
       radius: 9,
       color: '#fff',
       weight: 2,
-      fillColor: '#e8b86d',
+      fillColor: '#e8bc76',
       fillOpacity: 1,
     }).addTo(playLayer);
     map.panTo([point.lat, point.lng], { animate: true, duration: 0.25 });

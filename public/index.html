@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Timeline — visualisasi Google Timeline &amp; export video MP4</title>
-  <meta name="description" content="Ubah JSON Google Timeline jadi peta interaktif dan video MP4. Filter, playback, heatmap, studio visual — semua di browser, tanpa upload ke server.">
-  <meta name="theme-color" content="#0c1210">
+  <meta name="description" content="Jelajahi riwayat perjalanan di peta, putar ulang rutenya, dan buat video MP4 yang siap dibagikan. JSON diproses di perangkatmu.">
+  <meta name="theme-color" content="#0B1210">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Sora:wght@500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-  <link rel="stylesheet" href="/styles.css?v=11">
+  <link rel="stylesheet" href="/styles.css?v=12">
 </head>
 <body>
   <input type="file" id="file-input" accept=".json,application/json,.zip" hidden>
@@ -26,144 +26,211 @@
   </div>
 
   <section id="landing" class="landing">
-    <div class="landing-bg" aria-hidden="true"></div>
-
     <header class="landing-nav">
-      <p class="nav-brand">Timeline</p>
-      <a class="nav-link" href="#fitur">Fitur</a>
-      <a class="nav-link" href="#cara-kerja">Cara kerja</a>
-      <a class="nav-link" href="https://github.com/muhamadsyahrulmubarok/timeline-site" target="_blank" rel="noopener noreferrer">GitHub</a>
-      <a class="nav-link" href="#import-zone">Mulai</a>
+      <a class="nav-brand" href="#landing" aria-label="Timeline beranda">
+        <span class="nav-mark" aria-hidden="true"></span>
+        <span>Timeline</span>
+      </a>
+      <button type="button" class="nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="nav-menu" aria-label="Buka menu">
+        <span></span><span></span><span></span>
+      </button>
+      <nav id="nav-menu" class="nav-menu" aria-label="Navigasi utama">
+        <a class="nav-link" href="#fitur">Fitur</a>
+        <a class="nav-link" href="#cara-kerja">Cara kerja</a>
+        <a class="nav-link" href="https://github.com/muhamadsyahrulmubarok/timeline-site" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a class="btn primary nav-cta" href="#import-zone">Import Timeline</a>
+      </nav>
     </header>
 
     <div class="hero">
       <div class="hero-copy">
-        <p class="brand">Timeline</p>
-        <h1>Lihat jejakmu di peta. Ubah jadi video MP4.</h1>
+        <p class="hero-eyebrow">Google Timeline Visualizer</p>
+        <h1>Jejak perjalananmu,<br>jadi cerita.</h1>
         <p class="lead">
-          App client-side untuk JSON export Google Timeline — peta jalur, filter,
-          playback, heatmap, dan studio video dengan export MP4 di perangkatmu.
+          Jelajahi riwayat perjalanan di peta, putar ulang rutenya, dan buat video MP4 yang siap dibagikan.
         </p>
         <div class="hero-cta">
-          <a class="btn primary" href="#import-zone">Import JSON</a>
-          <button type="button" class="btn ghost" id="btn-sample-hero">Coba data contoh</button>
+          <a class="btn primary" href="#import-zone">Import Timeline</a>
+          <button type="button" class="btn secondary" id="btn-sample-hero">Coba data contoh</button>
         </div>
+        <p class="hero-privacy">File JSON diproses di perangkatmu.</p>
       </div>
-      <div class="hero-visual" aria-hidden="true">
-        <svg class="hero-map" viewBox="0 0 640 420" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <linearGradient id="trail" x1="40" y1="300" x2="580" y2="80" gradientUnits="userSpaceOnUse">
-              <stop stop-color="#3d9b7a"/>
-              <stop offset="0.55" stop-color="#5ec4a0"/>
-              <stop offset="1" stop-color="#e8b86d"/>
-            </linearGradient>
-            <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-              <feGaussianBlur stdDeviation="4" result="b"/>
-              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-            </filter>
-          </defs>
-          <rect width="640" height="420" rx="0" fill="#0a100e"/>
-          <g opacity="0.35" stroke="#3d9b7a" stroke-width="1">
-            <path d="M0 90H640M0 180H640M0 270H640M0 360H640"/>
-            <path d="M80 0V420M160 0V420M240 0V420M320 0V420M400 0V420M480 0V420M560 0V420"/>
-          </g>
-          <path class="hero-path" d="M48 340 C120 300 150 250 210 240 C280 228 300 300 360 280 C430 255 470 160 520 120 C545 100 570 90 600 70" stroke="url(#trail)" stroke-width="4" stroke-linecap="round" filter="url(#glow)"/>
-          <circle class="hero-dot" cx="210" cy="240" r="7" fill="#5ec4a0"/>
-          <circle class="hero-dot delay" cx="360" cy="280" r="6" fill="#e8b86d"/>
-          <circle class="hero-pulse" cx="600" cy="70" r="10" fill="#e8b86d"/>
-        </svg>
+
+      <div class="hero-visual">
+        <div class="preview-panel" id="hero-preview">
+          <div class="preview-badge">Contoh perjalanan</div>
+          <div class="preview-toolbar" aria-hidden="true">
+            <span class="preview-tab is-active">Peta</span>
+            <span class="preview-tab">Heatmap</span>
+            <span class="preview-tab">Studio</span>
+          </div>
+          <div class="preview-map-wrap">
+            <div id="hero-preview-fallback" class="preview-fallback" aria-hidden="true">
+              <svg class="preview-static" viewBox="0 0 640 400" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Pratinjau peta contoh">
+                <rect width="640" height="400" fill="#0B1210"/>
+                <g opacity="0.35" stroke="#293C32" stroke-width="1">
+                  <path d="M0 80H640M0 160H640M0 240H640M0 320H640"/>
+                  <path d="M80 0V400M160 0V400M240 0V400M320 0V400M400 0V400M480 0V400M560 0V400"/>
+                </g>
+                <path d="M40 120 C120 110 140 180 200 200" stroke="#1a2e26" stroke-width="10" stroke-linecap="round"/>
+                <path d="M200 200 C280 230 320 160 400 140 C480 120 520 200 600 220" stroke="#1a2e26" stroke-width="8" stroke-linecap="round"/>
+                <text x="72" y="96" fill="#8D9F93" font-size="11" font-family="system-ui,sans-serif">Kemang</text>
+                <text x="310" y="128" fill="#8D9F93" font-size="11" font-family="system-ui,sans-serif">Monas</text>
+                <text x="520" y="248" fill="#8D9F93" font-size="11" font-family="system-ui,sans-serif">Ancol</text>
+                <path class="preview-route" d="M90 300 C150 280 180 220 240 210 C310 196 340 260 400 245 C470 225 510 160 560 130" stroke="#64D8AB" stroke-width="3.5" stroke-linecap="round"/>
+                <circle cx="90" cy="300" r="7" fill="#0B1210" stroke="#64D8AB" stroke-width="2.5"/>
+                <path d="M560 118 L568 138 L552 138 Z" fill="#E8BC76"/>
+              </svg>
+            </div>
+            <div id="hero-preview-map" class="preview-map" hidden></div>
+          </div>
+          <div class="preview-playback" aria-hidden="true">
+            <span class="preview-play"></span>
+            <div class="preview-progress"><span style="width:42%"></span></div>
+            <span class="preview-time">08:40</span>
+            <span class="preview-time">14:00</span>
+          </div>
+          <div class="preview-summary" aria-hidden="true">
+            <div><strong>24,8 km</strong><span>Jarak</span></div>
+            <div><strong>5 j 20 m</strong><span>Durasi</span></div>
+            <div><strong>4 tempat</strong><span>Dikunjungi</span></div>
+          </div>
+        </div>
       </div>
     </div>
 
     <section id="fitur" class="landing-section">
-      <p class="section-kicker">Fitur</p>
-      <h2 class="section-title">Semua yang kamu butuhkan dari Timeline</h2>
-      <p class="section-lead">Satu tempat untuk baca, saring, putar ulang, dan render jejak lokasi jadi klip yang siap dibagikan.</p>
-      <ul class="feature-grid">
-        <li>
-          <strong>Parser multi-format</strong>
-          <span>Records.json, Semantic Location History, dan export Timeline dari ponsel — terdeteksi otomatis.</span>
-        </li>
-        <li>
-          <strong>Filter &amp; playback</strong>
-          <span>Rentang tanggal, aktivitas, cari tempat, lalu putar jalur di peta dengan kecepatan yang bisa diatur.</span>
-        </li>
-        <li>
-          <strong>Heatmap</strong>
-          <span>Lihat area yang sering kamu lewati tanpa mengorbankan detail jalur.</span>
-        </li>
-        <li>
-          <strong>Export GeoJSON</strong>
-          <span>Ambil titik &amp; segmen untuk dipakai di GIS atau tool lain.</span>
-        </li>
-        <li>
-          <strong>Studio video + MP4</strong>
-          <span>Background peta statis + label kota yang dilalui, ikon motor/sepeda, kecepatan 0.5×–8×, resolusi hingga 1440p. Export MP4 di browser.</span>
-        </li>
-        <li>
-          <strong>Privasi di perangkat</strong>
-          <span>File tidak diunggah ke server. Parse, peta, dan encode video berjalan lokal.</span>
-        </li>
-      </ul>
+      <h2 class="section-title">Dari riwayat lokasi ke cerita perjalanan.</h2>
+      <p class="section-lead">Jelajahi, pilih momen, lalu buat hasil yang bisa kamu bagikan.</p>
+
+      <div class="feature-asymmetric">
+        <article class="feature-card feature-card-lg">
+          <div class="feature-card-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M3 11.5 12 3l9 8.5V21a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z"/></svg>
+          </div>
+          <h3>Jelajahi perjalanan</h3>
+          <p>Peta interaktif dengan filter tanggal &amp; aktivitas, plus playback rute untuk melihat perjalanan bergerak.</p>
+          <div class="feature-mini-route" aria-hidden="true">
+            <svg viewBox="0 0 200 56" fill="none"><path d="M8 40 C40 36 50 18 80 20 C110 22 120 40 150 34 C170 30 180 18 192 14" stroke="#64D8AB" stroke-width="2.5" stroke-linecap="round"/><circle cx="8" cy="40" r="4" fill="#64D8AB"/><circle cx="192" cy="14" r="4" fill="#E8BC76"/></svg>
+          </div>
+        </article>
+
+        <article class="feature-card feature-card-lg">
+          <div class="feature-card-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9.5v5l4.5-2.5L10 9.5Z"/></svg>
+          </div>
+          <h3>Buat video perjalanan</h3>
+          <p>Buka Studio, atur kecepatan &amp; resolusi, lalu export MP4 di perangkatmu — siap dibagikan.</p>
+          <div class="feature-mini-video" aria-hidden="true">
+            <div class="mini-video-frame"></div>
+            <div class="mini-video-bar"><span style="width:55%"></span></div>
+          </div>
+        </article>
+      </div>
+
+      <div class="feature-compact-grid">
+        <article class="feature-card feature-card-sm">
+          <div class="feature-card-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7" opacity=".55"/><circle cx="12" cy="12" r="11" opacity=".3"/></svg>
+          </div>
+          <h3>Heatmap aktivitas</h3>
+          <p>Lihat area yang paling sering dikunjungi.</p>
+        </article>
+        <article class="feature-card feature-card-sm">
+          <div class="feature-card-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M14 3v5h5"/></svg>
+          </div>
+          <h3>Beragam format JSON</h3>
+          <p>Records.json, Semantic Location History, dan export Timeline dari ponsel.</p>
+        </article>
+        <article class="feature-card feature-card-sm">
+          <div class="feature-card-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+          </div>
+          <h3>Export GeoJSON</h3>
+          <p>Lanjutkan pengolahan data di aplikasi GIS lain.</p>
+        </article>
+        <article class="feature-card feature-card-sm">
+          <div class="feature-card-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12h8M12 8v8"/></svg>
+          </div>
+          <h3>Pemrosesan lokal</h3>
+          <p>File riwayat lokasi diproses di perangkat pengguna.</p>
+        </article>
+      </div>
     </section>
 
     <section id="cara-kerja" class="landing-section">
-      <p class="section-kicker">Cara kerja</p>
-      <h2 class="section-title">Tiga langkah ke peta &amp; video</h2>
+      <h2 class="section-title">Mulai dalam tiga langkah.</h2>
       <ol class="steps">
         <li>
-          <span class="step-num">1</span>
+          <span class="step-num">01</span>
           <div>
-            <strong>Export dari Google</strong>
-            <p>Google Maps → Timeline → Export, atau Takeout Location History (JSON).</p>
+            <strong>Siapkan file Timeline</strong>
+            <p>Export riwayat lokasi dari Google dalam format JSON.</p>
           </div>
         </li>
         <li>
-          <span class="step-num">2</span>
+          <span class="step-num">02</span>
           <div>
-            <strong>Upload di sini</strong>
-            <p>Drag &amp; drop atau pilih file. Parsing jalan di browser — bisa beberapa detik untuk file besar.</p>
+            <strong>Import dan jelajahi</strong>
+            <p>Pilih file, lalu gunakan filter untuk menemukan perjalanan yang ingin kamu lihat.</p>
           </div>
         </li>
         <li>
-          <span class="step-num">3</span>
+          <span class="step-num">03</span>
           <div>
-            <strong>Jelajahi &amp; render</strong>
-            <p>Filter, playback, heatmap, lalu buka Studio untuk export video MP4.</p>
+            <strong>Buat video</strong>
+            <p>Buka Studio, atur tampilan, lalu export perjalanan sebagai MP4.</p>
           </div>
         </li>
       </ol>
-    </section>
-
-    <section id="privasi" class="landing-section privacy-block">
-      <p class="section-kicker">Privasi</p>
-      <h2 class="section-title">Datamu tetap di perangkatmu</h2>
-      <p class="section-lead">
-        Timeline tidak menerima upload JSON ke server. File dibaca di tab browser,
-        digambar di peta, dan bila kamu export video — encoder ffmpeg.wasm juga berjalan lokal.
-        Tutup tab, selesai.
-      </p>
+      <details class="help-json" id="bantuan-json">
+        <summary>Cara mendapatkan file JSON</summary>
+        <div class="help-json-body">
+          <p>Format yang didukung aplikasi:</p>
+          <ul>
+            <li><strong>Records.json</strong> — Location History klasik dari Google Takeout.</li>
+            <li><strong>Semantic Location History</strong> — folder bulanan Takeout (JSON per bulan).</li>
+            <li><strong>Export Timeline dari ponsel</strong> — JSON dari Google Maps Timeline di perangkat.</li>
+          </ul>
+          <p>Di Google Takeout, pilih Location History / Timeline, unduh ZIP, lalu ekstrak file JSON-nya. File dibaca di browser — tidak diunggah ke server Timeline.</p>
+        </div>
+      </details>
     </section>
 
     <section id="import-zone" class="landing-section import-section">
-      <p class="section-kicker">Mulai</p>
-      <h2 class="section-title">Import JSON Timeline</h2>
-      <div id="dropzone" class="dropzone" role="button" tabindex="0" aria-label="Import file JSON Google Timeline">
-        <p class="drop-title">Import JSON</p>
-        <p class="drop-sub">Ketuk di sini atau drag &amp; drop file</p>
-        <div class="drop-actions">
-          <button type="button" class="btn primary" id="btn-pick-json">Pilih file JSON</button>
-          <button type="button" class="btn ghost" id="btn-sample">Coba data contoh</button>
+      <div class="import-panel">
+        <h2 class="section-title">Siap melihat kembali perjalananmu?</h2>
+        <p class="section-lead">Import file JSON Timeline untuk mulai menjelajahi.</p>
+        <div id="dropzone" class="dropzone" role="button" tabindex="0" aria-label="Pilih file JSON Google Timeline">
+          <div class="drop-icon" aria-hidden="true">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 20h16"/></svg>
+          </div>
+          <p class="drop-title">Tarik file JSON ke sini</p>
+          <p class="drop-sub">atau pilih file dari perangkatmu</p>
+          <div class="drop-actions">
+            <button type="button" class="btn primary" id="btn-pick-json">Pilih file JSON</button>
+            <button type="button" class="btn secondary" id="btn-sample">Coba data contoh</button>
+          </div>
+          <p class="hint">Records.json · Semantic Location History · export Timeline dari ponsel</p>
+          <p class="privacy-note">File JSON diproses secara lokal di perangkatmu. Peta dan font mungkin tetap memuat aset dari jaringan.</p>
+          <p id="upload-status" class="status" role="status"></p>
         </div>
-        <p class="hint">Records.json · Semantic Location History · export Timeline dari ponsel</p>
-        <p id="upload-status" class="status" role="status"></p>
       </div>
     </section>
 
     <footer class="landing-footer">
-      <span>Timeline</span>
-      <a class="footer-link" href="https://github.com/muhamadsyahrulmubarok/timeline-site" target="_blank" rel="noopener noreferrer">Open source di GitHub</a>
-      <span>Client-side · tanpa akun</span>
+      <div class="footer-brand">
+        <strong>Timeline</strong>
+        <span>Ubah jejak perjalanan menjadi cerita.</span>
+      </div>
+      <div class="footer-links">
+        <a class="footer-link" href="https://github.com/muhamadsyahrulmubarok/timeline-site" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a class="footer-link" href="#bantuan-json">Bantuan JSON</a>
+        <a class="footer-link" href="#import-zone">Privasi</a>
+        <span>Tanpa akun</span>
+      </div>
     </footer>
   </section>
 
@@ -262,7 +329,7 @@
         </div>
         <div class="studio-head-actions">
           <button type="button" class="btn primary" id="btn-import-studio">Import JSON</button>
-          <button type="button" class="btn ghost" id="btn-close-studio">Tutup</button>
+          <button type="button" class="btn secondary" id="btn-close-studio">Tutup</button>
         </div>
       </header>
       <div class="studio-grid">
@@ -313,10 +380,10 @@
           </div>
           <p id="studio-status" class="status"></p>
           <div class="row wrap">
-            <button type="button" class="btn" id="btn-preview-video">Preview</button>
+            <button type="button" class="btn secondary" id="btn-preview-video">Preview</button>
             <button type="button" class="btn primary" id="btn-export-video">Export MP4</button>
-            <button type="button" class="btn ghost" id="btn-cancel-export" hidden>Batalkan</button>
-            <button type="button" class="btn" id="btn-download-webm" hidden>Unduh WebM</button>
+            <button type="button" class="btn secondary" id="btn-cancel-export" hidden>Batalkan</button>
+            <button type="button" class="btn secondary" id="btn-download-webm" hidden>Unduh WebM</button>
           </div>
           <p class="hint">Konversi WebM→MP4 memakai ffmpeg_asm.js (Muaz Khan / Ffmpeg.js). Encoder ~4.5MB terkompresi, di-cache browser. Kalau browser mendukung MP4 native, encoder tidak dipakai.</p>
         </div>
@@ -326,6 +393,6 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
-  <script type="module" src="/js/app.js?v=16"></script>
+  <script type="module" src="/js/app.js?v=18"></script>
 </body>
 </html>

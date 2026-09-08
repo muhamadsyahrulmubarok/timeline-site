@@ -1,5 +1,5 @@
 /**
- * Canvas video studio — static map tiles background, city labels, WebM/MP4 export.
+ * Canvas video studio — OSM static map tiles, city labels, end summary, WebM/MP4 export.
  */
 
 import { activityColor } from './map.js';
@@ -34,10 +34,10 @@ export const ICON_OPTIONS = [
 ];
 
 const TILE_SIZE = 256;
-const TILE_SUBS = ['a', 'b', 'c', 'd'];
 const PATH_COLOR = '#1d6b4f';
 const ACCENT = '#c9872a';
 const MAX_TILES = 48;
+const SUMMARY_HOLD_SEC = 3.2;
 
 /** @deprecated themes removed — kept for older app.js imports */
 export function listFilters() {
@@ -123,8 +123,8 @@ function createMercator(bounds, w, h) {
 function loadTileImage(z, x, y) {
   const n = 2 ** z;
   const xx = ((x % n) + n) % n;
-  const s = TILE_SUBS[(xx + y) % 4];
-  const url = `https://${s}.basemaps.cartocdn.com/rastertiles/voyager/${z}/${xx}/${y}.png`;
+  // OpenStreetMap raster — no API key (unlike some Carto CDN responses)
+  const url = `https://tile.openstreetmap.org/${z}/${xx}/${y}.png`;
   return new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -183,9 +183,36 @@ async function buildStaticMap(bounds, w, h, onProgress) {
 
   octx.fillStyle = 'rgba(0,0,0,0.45)';
   octx.font = '500 11px "IBM Plex Sans", system-ui, sans-serif';
-  octx.fillText('© OpenStreetMap © CARTO', 16, h - 14);
+  octx.fillText('© OpenStreetMap contributors', 16, h - 14);
 
   return { canvas: off, merc };
+}
+
+function fmtKm(m) {
+  if (!Number.isFinite(m) || m <= 0) return '0';
+  if (m >= 1000) {
+    const km = m / 1000;
+    return km >= 100 ? km.toFixed(0) : km.toFixed(1);
+  }
+  return (m / 1000).toFixed(2);
+}
+
+function countUniqueCities(visits) {
+  const seen = new Set();
+  for (const v of visits || []) {
+    const label = cityLabelForVisit(v).toLowerCase();
+    if (label) seen.add(label);
+  }
+  return seen.size;
+}
+
+export function buildTripSummary(data) {
+  const visits = data?.visits || [];
+  return {
+    distanceKm: fmtKm(data?.stats?.distanceM ?? 0),
+    cityCount: countUniqueCities(visits),
+    visitCount: data?.stats?.visitCount ?? visits.length,
+  };
 }
 
 function formatStamp(t) {
@@ -403,6 +430,71 @@ function drawCityLabels(ctx, merc, labels) {
   }
 }
 
+function drawSummaryOverlay(ctx, w, h, summary, progress = 1) {
+  const alpha = Math.min(1, Math.max(0, progress));
+  ctx.save();
+  ctx.globalAlpha = alpha;
+
+  ctx.fillStyle = 'rgba(12, 18, 16, 0.72)';
+  ctx.fillRect(0, 0, w, h);
+
+  const cardW = Math.min(720, w * 0.78);
+  const cardH = Math.min(280, h * 0.42);
+  const cx = (w - cardW) / 2;
+  const cy = (h - cardH) / 2;
+
+  ctx.fillStyle = 'rgba(255,255,255,0.96)';
+  roundRect(ctx, cx, cy, cardW, cardH, 16);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.fillStyle = PATH_COLOR;
+  ctx.font = `600 ${Math.round(cardH * 0.12)}px "Sora", system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillText('Ringkasan perjalanan', w / 2, cy + cardH * 0.22);
+
+  const stats = [
+    { value: summary.distanceKm, unit: 'km', caption: 'Jarak' },
+    { value: String(summary.cityCount), unit: '', caption: 'Kota' },
+    { value: String(summary.visitCount), unit: '', caption: 'Kunjungan' },
+  ];
+  const colW = cardW / 3;
+  const valueSize = Math.round(cardH * 0.28);
+  const unitSize = Math.round(cardH * 0.1);
+  const captionSize = Math.round(cardH * 0.09);
+
+  stats.forEach((s, i) => {
+    const x = cx + colW * i + colW / 2;
+    ctx.fillStyle = '#1a2420';
+    ctx.font = `700 ${valueSize}px "Sora", system-ui, sans-serif`;
+    const num = s.value;
+    if (s.unit) {
+      const numW = ctx.measureText(num).width;
+      ctx.font = `600 ${unitSize}px "IBM Plex Sans", system-ui, sans-serif`;
+      const unitW = ctx.measureText(` ${s.unit}`).width;
+      const start = x - (numW + unitW) / 2;
+      ctx.font = `700 ${valueSize}px "Sora", system-ui, sans-serif`;
+      ctx.textAlign = 'left';
+      ctx.fillText(num, start, cy + cardH * 0.55);
+      ctx.fillStyle = ACCENT;
+      ctx.font = `600 ${unitSize}px "IBM Plex Sans", system-ui, sans-serif`;
+      ctx.fillText(` ${s.unit}`, start + numW, cy + cardH * 0.55);
+    } else {
+      ctx.textAlign = 'center';
+      ctx.fillText(num, x, cy + cardH * 0.55);
+    }
+    ctx.fillStyle = '#667';
+    ctx.font = `500 ${captionSize}px "IBM Plex Sans", system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(s.caption, x, cy + cardH * 0.78);
+  });
+
+  ctx.restore();
+  ctx.textAlign = 'left';
+}
+
 function buildFrames(data) {
   if (!data) return [];
   const fromSeg = [];
@@ -546,6 +638,10 @@ export function createVideoStudio(canvas) {
       ctx.fillStyle = ACCENT;
       ctx.fillRect(28, h - 28, (w - 56) * prog, 6);
     }
+
+    if (opts.showSummary && opts.summary) {
+      drawSummaryOverlay(ctx, w, h, opts.summary, opts.summaryProgress ?? 1);
+    }
   }
 
   async function prepareScene(data, opts = {}, onMapProgress) {
@@ -558,7 +654,9 @@ export function createVideoStudio(canvas) {
 
     const bounds = boundsFromPoints(frames);
     const labels = pickVisitLabels(data?.visits || [], 14);
+    const summary = buildTripSummary(data);
     const key = [
+      'osm',
       w,
       h,
       bounds.minLat.toFixed(4),
@@ -586,12 +684,29 @@ export function createVideoStudio(canvas) {
       fullOpts: {
         ...opts,
         labels,
+        summary,
         mapBg,
         merc,
         width: w,
         height: h,
       },
     };
+  }
+
+  async function holdSummary(frames, fullOpts, fps, onTick) {
+    const total = Math.max(1, Math.round(SUMMARY_HOLD_SEC * fps));
+    const fade = Math.min(18, Math.floor(total * 0.25));
+    for (let s = 0; s < total; s++) {
+      if (cancelled) throw new ExportCancelled();
+      const progress = s < fade ? (s + 1) / fade : 1;
+      renderFrame(frames, frames.length - 1, {
+        ...fullOpts,
+        showSummary: true,
+        summaryProgress: progress,
+      });
+      onTick?.(s, total);
+      await new Promise((r) => setTimeout(r, 1000 / fps));
+    }
   }
 
   async function preview(data, opts = {}) {
@@ -601,16 +716,37 @@ export function createVideoStudio(canvas) {
     if (cancelled) return { frames: frames.length };
 
     let i = 0;
+    let phase = 'trail'; // trail | summary
+    let summaryStarted = 0;
     const speed = Number(fullOpts.speed) || 1;
-    const tick = () => {
+    const fadeMs = 450;
+
+    const tick = (now) => {
       if (cancelled) return;
-      const idx = Math.min(Math.floor(i), frames.length - 1);
-      renderFrame(frames, idx, fullOpts);
-      i += speed;
-      if (i >= frames.length) i = 0;
+      if (phase === 'trail') {
+        const idx = Math.min(Math.floor(i), frames.length - 1);
+        renderFrame(frames, idx, fullOpts);
+        i += speed;
+        if (i >= frames.length) {
+          phase = 'summary';
+          summaryStarted = now;
+        }
+      } else {
+        const elapsed = now - summaryStarted;
+        const progress = Math.min(1, elapsed / fadeMs);
+        renderFrame(frames, frames.length - 1, {
+          ...fullOpts,
+          showSummary: true,
+          summaryProgress: progress,
+        });
+        if (elapsed >= SUMMARY_HOLD_SEC * 1000) {
+          phase = 'trail';
+          i = 0;
+        }
+      }
       animId = requestAnimationFrame(tick);
     };
-    tick();
+    animId = requestAnimationFrame(tick);
     return { frames: frames.length };
   }
 
@@ -662,6 +798,7 @@ export function createVideoStudio(canvas) {
 
     recorder.start(100);
 
+    const trailShare = 0.88;
     for (let i = 0; i < frames.length; i += speed) {
       if (cancelled) {
         try {
@@ -670,11 +807,15 @@ export function createVideoStudio(canvas) {
         throw new ExportCancelled();
       }
       renderFrame(frames, Math.min(Math.floor(i), frames.length - 1), fullOpts);
-      if (onProgress) onProgress(0.08 + (i / frames.length) * 0.92);
+      if (onProgress) onProgress(0.08 + (i / frames.length) * trailShare);
       await new Promise((r) => setTimeout(r, 1000 / fps));
     }
     renderFrame(frames, frames.length - 1, fullOpts);
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 200));
+
+    await holdSummary(frames, fullOpts, fps, (s, total) => {
+      if (onProgress) onProgress(0.08 + trailShare + (s / total) * 0.04);
+    });
 
     if (cancelled) throw new ExportCancelled();
 
